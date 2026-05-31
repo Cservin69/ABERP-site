@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import RainCanvas from '$lib/rain-effect/RainCanvas.svelte';
 	import Wordmark from '$lib/brand/Wordmark.svelte';
 
@@ -24,6 +25,12 @@
 		</p>
 		<a class="cta" href="mailto:{CONTACT_EMAIL}">Get a quote</a>
 	</div>
+
+	<nav class="footer-links" aria-label="Legal">
+		<a href={resolve('/privacy')}>Privacy</a>
+		<span class="sep" aria-hidden="true">·</span>
+		<a href={resolve('/imprint')}>Imprint</a>
+	</nav>
 </section>
 
 <style>
@@ -99,6 +106,46 @@
 		outline: none;
 	}
 
+	.footer-links {
+		position: absolute;
+		bottom: 1.5rem;
+		left: 0;
+		right: 0;
+		z-index: 1;
+		text-align: center;
+		font-size: 0.75rem;
+		letter-spacing: 0.05em;
+		opacity: 0.6;
+		transition: opacity 160ms ease;
+		text-shadow: 0 1px 6px rgba(0, 0, 0, 0.55);
+	}
+
+	.footer-links:hover {
+		opacity: 1;
+	}
+
+	.footer-links a {
+		color: #f3eee5;
+		text-decoration: none;
+		padding: 0.25rem 0.4rem;
+		border-bottom: 1px solid transparent;
+		transition:
+			color 160ms ease,
+			border-color 160ms ease;
+	}
+
+	.footer-links a:hover,
+	.footer-links a:focus-visible {
+		color: #d4a574;
+		border-bottom-color: #d4a574;
+		outline: none;
+	}
+
+	.footer-links .sep {
+		color: rgba(243, 238, 229, 0.5);
+		margin: 0 0.25rem;
+	}
+
 	@media (max-width: 480px) {
 		.content {
 			padding: 1.25rem;
@@ -109,6 +156,9 @@
 		.cta {
 			display: block;
 			padding: 0.85rem 1rem;
+		}
+		.footer-links {
+			bottom: 1rem;
 		}
 	}
 </style>
