@@ -51,6 +51,37 @@
 		</section>
 
 		<section>
+			<h2>Quote requests (Phase 2)</h2>
+			<p>
+				If you submit the <a href={resolve('/quote')}>quote form</a>, we additionally process the
+				following data, solely to respond to your request:
+			</p>
+			<ul>
+				<li>
+					<strong>Form fields you provide:</strong> name, email, optional company, optional material preference,
+					optional quantity, optional needed-by date, optional notes.
+				</li>
+				<li>
+					<strong>CAD files you upload</strong> and their original filenames, sizes, and submission timestamp.
+					CAD files are treated as customer intellectual property and are not shared outside Friboard's
+					quoting workflow.
+				</li>
+				<li><strong>Consent timestamp.</strong></li>
+			</ul>
+			<p>
+				<strong>Where it lives.</strong> During Phase 2 the data is stored on the Friboard
+				operator's instance; it is not yet integrated into the ABERP order-management system.
+				<strong>Retention</strong> is determined by the operator and is documented in the operator
+				runbook. <strong>Lawful basis:</strong> pre-contractual steps at your request, GDPR Art. 6(1)(b).
+			</p>
+			<p>
+				To exercise any GDPR right in respect of a quote request, email
+				<a href="mailto:hello@friboard.com">hello@friboard.com</a> and include the quote reference ID
+				shown on screen after submission.
+			</p>
+		</section>
+
+		<section>
 			<h2>What data is NOT processed</h2>
 			<ul>
 				<li>No cookies, local storage, or session storage are set.</li>
@@ -70,6 +101,10 @@
 				<li>
 					<strong>Email correspondence:</strong> performance of pre-contractual steps or legitimate interest
 					per Art. 6(1)(b)/(f), depending on the nature of your inquiry.
+				</li>
+				<li>
+					<strong>Quote requests:</strong> performance of pre-contractual steps at your request per Art.
+					6(1)(b).
 				</li>
 			</ul>
 		</section>

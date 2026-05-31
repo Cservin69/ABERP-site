@@ -13,6 +13,26 @@ The only contact path on friboard.com is a `mailto:` link. Clicking it opens you
 - **Page views.** Standard HTTP request metadata (IP address, user-agent, referrer, requested URL, timestamp) is briefly visible to our CDN (Amazon CloudFront) to deliver the page. If CloudFront access logs are enabled, this metadata is retained for up to 30 days for security and debugging purposes. It is not used for analytics, profiling, or marketing.
 - **Email contact.** When you email `hello@friboard.com`, the contents and your email address are processed by Ervin's email provider under that provider's privacy policy. We use this data only to respond to your inquiry. Retention is determined by Ervin and the email provider; assume up to 24 months unless you request earlier deletion.
 
+## Quote requests (Phase 2)
+
+If you submit a quote request via the `/quote` form, the following data is processed:
+
+- **Form fields you provide.** Your name, email address, optional company name, optional material preference, optional quantity, optional needed-by date, and optional notes.
+- **CAD files you upload.** The files themselves and their original filenames, sizes, and the timestamp of submission. CAD files are treated as customer intellectual property and are not shared outside of Friboard's quoting workflow.
+- **Consent timestamp.** The time at which you confirmed the consent checkbox.
+
+**Purpose.** This data is used solely to respond to your quote request — reviewing the CAD, estimating cost and lead time, and replying to the email address you provided.
+
+**Where it lives.** During Phase 2 the data is stored on the Friboard operator's instance (the host serving `friboard.com`). It is not yet ingested into the ABERP order-management system. The 2.0 cutover (planned) will move processed quote data into ABERP under a separate processing record.
+
+**Retention.** Retention is determined by the operator. Submitted quote data is kept at least until a quote is delivered and a reasonable response window has elapsed; specific retention rules are pending and will be documented here when finalised.
+
+**Lawful basis (GDPR Art. 6).** Performance of pre-contractual steps at the data subject's request (Art. 6(1)(b)).
+
+**Your rights.** All GDPR rights listed below apply. To exercise any of them in respect of a quote request, email `hello@friboard.com` and quote your quote reference ID (shown on screen after submission and included in any reply we send).
+
+**Security caveats (Phase 2).** CAD files are stored on the operator instance without at-rest encryption beyond the underlying disk encryption of the host. No third-party processors receive your quote data during Phase 2. This will be tightened in Phase 3 and again at the 2.0 cutover.
+
 ## What data is NOT processed
 
 - No cookies, local storage, or session storage are set.

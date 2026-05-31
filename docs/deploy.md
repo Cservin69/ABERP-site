@@ -1,6 +1,13 @@
-# Deploy runbook — friboard.com (AWS S3 + CloudFront)
+# Deploy runbook — friboard.com (AWS S3 + CloudFront + Lightsail)
 
 **Status:** documentation only. No AWS resources are created or modified by code in this repo. Ervin owns the AWS account and provisions resources manually. `bin/deploy.sh` is committed but **not** executed from this repo until Ervin confirms infrastructure is in place and sets the required env vars.
+
+> **Phase 2 update (2026-05-31).** The repo now uses `@sveltejs/adapter-node` (was `adapter-static`). `npm run build` produces a Node-runnable `build/` with `build/index.js` as the entry, but every route is _also_ prerendered to static HTML when `export const prerender = true` is set on its `+page.ts`. The Phase 2 site has **two deploy surfaces**:
+>
+> - **Static surface** — `/`, `/privacy`, `/imprint` plus all hashed `_app/immutable/*` assets, favicons, and OG images. Still hosted on S3 + CloudFront exactly as in Phase 1.
+> - **Dynamic surface** — `/quote` (form, SSR) and `/api/*` (quote submission + operator-pull). Requires a Node runtime. Phase 2 conservative target: **AWS Lightsail container service** in `eu-central-1` (Frankfurt). Rejected alternatives: `adapter-vercel` and `adapter-cloudflare` (AWS-only mandate, see `e2e-shop` memory).
+>
+> The static and dynamic surfaces share a single CloudFront distribution: dynamic paths are routed to the Lightsail origin via an additional cache behavior. See [Phase 2 — dynamic surface](#phase-2--dynamic-surface) below.
 
 ## Target topology
 
@@ -237,3 +244,141 @@ There is no automated rollback in Phase 1. If a bad deploy ships:
 3. `aws cloudfront create-invalidation --distribution-id "$ABERP_SITE_DIST" --paths '/*'` (broad invalidation acceptable for emergency rollback).
 
 S3 bucket versioning preserves the prior object versions for forensics but is not used in this rollback path.
+
+---
+
+## Phase 2 — dynamic surface
+
+Phase 2 introduces the `/quote` form and a small API surface. Static delivery (Phase 1) does not change; this section describes the additional Node runtime.
+
+### Build output
+
+`adapter-node` writes a self-contained Node application to `build/`:
+
+- `build/index.js` — entry point. Run with `node build`.
+- `build/handler.js` — middleware-style handler if you want to embed it in a custom server.
+- `build/client/` and `build/server/` — bundled client and server code.
+- Prerendered routes (`/`, `/privacy`, `/imprint`) are still written as static HTML alongside the server bundle. They can be uploaded to S3 the same way as before; the Node runtime only needs to serve `/quote` and `/api/*`.
+
+### Runtime target — AWS Lightsail (conservative choice)
+
+Phase 2 v1 deploys the Node runtime to **AWS Lightsail container service** in `eu-central-1` (Frankfurt):
+
+- Lightsail "Nano" or "Micro" container plan is sufficient for low traffic.
+- Stays inside the AWS account (consistent with the `e2e-shop` AWS-only mandate).
+- Cheaper and simpler than ECS / App Runner for a single small Node app at this scale.
+- Has a managed HTTPS endpoint that CloudFront can use as a custom origin.
+
+Alternatives considered:
+
+- **adapter-vercel / adapter-cloudflare** — rejected. The shop platform is committed to AWS.
+- **AWS App Runner / ECS Fargate** — overkill for one small Node service; revisit at the 2.0 cutover.
+- **EC2 + systemd** — viable but higher operational burden than Lightsail.
+
+### Container
+
+Minimal `Dockerfile` (not yet committed — sketch only):
+
+```dockerfile
+FROM node:22-alpine
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+COPY build ./build
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV ABERP_SITE_QUOTE_DIR=/var/aberp/quotes
+EXPOSE 3000
+CMD ["node", "build"]
+```
+
+### Env vars (Lightsail container service env)
+
+| Variable               | Purpose                                                                    |
+| ---------------------- | -------------------------------------------------------------------------- |
+| `PORT`                 | Node listen port. Default `3000`. Lightsail expects this on the container. |
+| `NODE_ENV`             | `production`.                                                              |
+| `ABERP_SITE_QUOTE_DIR` | Path where quote submissions are staged. Default `./data/quotes`.          |
+
+### Persistent storage (REQUIRED — non-negotiable)
+
+`ABERP_SITE_QUOTE_DIR` **must** point at a persistent volume mount, not the container's ephemeral filesystem. If the container restarts, in-flight quote submissions and any not-yet-pulled metadata.json files **will be lost**, including customer PII and CAD-as-IP.
+
+Lightsail container service does not offer persistent volumes natively. Two acceptable patterns:
+
+1. **EFS via a small EC2 sidecar** — mount EFS on an EC2 instance, expose it to Lightsail over the VPC peering link. Operationally heavier.
+2. **Block storage on a Lightsail instance (not container)** — drop Lightsail container service and use a Lightsail Linux instance + attached block storage volume instead. Simpler. **Recommended for Phase 2.**
+
+Pick the second option unless there's a specific reason not to. The container service is convenient but loses to durability requirements here.
+
+### Backup
+
+`data/quotes/` is the ground truth for any quote that hasn't been pulled into ABERP yet. Until the 2.0 cutover that closes the operator-pull loop, the simplest backup is `rsync` to a private S3 bucket:
+
+```sh
+# Run from the Lightsail host on a cron (every 15 minutes is fine for this volume).
+aws s3 sync /var/aberp/quotes "s3://friboard-com-quotes-backup" \
+  --storage-class STANDARD_IA \
+  --exact-timestamps
+```
+
+Encrypt the backup bucket with SSE-KMS, region `eu-central-1`, block all public access, and set a lifecycle rule that transitions to Glacier after 30 days.
+
+### CloudFront routing
+
+Add one extra cache behavior to the existing distribution:
+
+| Path pattern | Origin                   | Cache policy    |
+| ------------ | ------------------------ | --------------- |
+| `/quote`     | Lightsail HTTPS endpoint | CachingDisabled |
+| `/quote/*`   | Lightsail HTTPS endpoint | CachingDisabled |
+| `/api/*`     | Lightsail HTTPS endpoint | CachingDisabled |
+
+Use a managed origin request policy that forwards all viewer headers, cookies, and query params. Disable caching for the dynamic surface — the form is per-session and the API is non-idempotent.
+
+The Phase 1 viewer-request function (rewriting `/privacy` → `/privacy.html`) **must not** rewrite `/quote` or `/api/*`. Update the function so the rewrite is only applied to the explicit prerendered paths.
+
+### Operator-pull endpoint security caveat
+
+`GET /api/quotes` lists every submitted quote and returns full metadata (including customer name, email, and the file list). **It has no authentication in Phase 2 v1.** Before exposing the dynamic surface to the internet:
+
+1. Restrict the CloudFront origin to require a custom header (e.g. `X-Friboard-Auth`) that the Lightsail app validates, OR
+2. Add a per-request API key check on `/api/quotes` (single shared secret in env), OR
+3. Block `/api/quotes` at the CloudFront edge entirely and tunnel into Lightsail over SSM/SSH to fetch.
+
+Option 2 is the cheapest stop-gap. Authentication design is finalised at the 2.0 cutover when ABERP becomes the consumer.
+
+### Pre-deploy build sanity (Phase 2 addendum)
+
+In addition to the Phase 1 build sanity:
+
+```sh
+npm run build
+
+# verify the Node entry exists
+test -f build/index.js || { echo "build/index.js missing"; exit 1; }
+
+# verify the prerendered routes still ship as HTML
+test -f build/client/index.html || true   # not guaranteed by adapter-node, depends on prerender output dir
+ls build/prerendered/pages 2>/dev/null    # adapter-node puts prerendered HTML under build/prerendered
+
+# smoke-test the runtime locally
+PORT=3001 ABERP_SITE_QUOTE_DIR=/tmp/aberp-smoke node build &
+SMOKE_PID=$!
+sleep 2
+curl -fsS http://localhost:3001/ > /dev/null
+curl -fsS http://localhost:3001/quote > /dev/null
+kill "$SMOKE_PID"
+rm -rf /tmp/aberp-smoke
+```
+
+### Not in scope of Phase 2 v1
+
+The following are deferred to Phase 3:
+
+- **Authentication on `/api/quotes`** — Phase 2 v1 is localhost-only, then guarded at the CloudFront edge by a custom header on the first internet deploy. Real auth lands at the 2.0 cutover when ABERP polls.
+- **Virus / malware scanning of uploaded CAD** — defer until upload volume justifies a ClamAV sidecar or a third-party scan API.
+- **Rate limiting on `POST /api/quote`** — would need a shared KV store (Redis / DynamoDB). Defer; CloudFront WAF rate limit is the cheap stop-gap if abuse appears.
+- **Encryption at rest beyond underlying disk encryption** — CAD-as-IP risk is acknowledged; per-quote envelope encryption is a Phase 3 design item.
+- **Automated retention / erasure** — privacy policy currently says retention is operator-determined; an automated TTL is a Phase 3 deliverable.
+- **Customer / operator email notifications** — Phase 2 v1 has no SMTP integration. The operator polls `GET /api/quotes`; customer follow-up is manual via the email address they provided.

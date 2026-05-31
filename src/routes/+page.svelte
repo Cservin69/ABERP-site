@@ -2,8 +2,6 @@
 	import { resolve } from '$app/paths';
 	import RainCanvas from '$lib/rain-effect/RainCanvas.svelte';
 	import Wordmark from '$lib/brand/Wordmark.svelte';
-
-	const CONTACT_EMAIL = 'hello@friboard.com';
 </script>
 
 <svelte:head>
@@ -23,7 +21,7 @@
 		<p class="tagline">
 			<span class="tag-accent">A —</span> Your CAD. Your part. Made.
 		</p>
-		<a class="cta" href="mailto:{CONTACT_EMAIL}">Get a quote</a>
+		<a class="cta" href={resolve('/quote')}>Get a quote</a>
 	</div>
 
 	<nav class="footer-links" aria-label="Legal">
