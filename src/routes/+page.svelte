@@ -1,5 +1,6 @@
 <script lang="ts">
 	import RainCanvas from '$lib/rain-effect/RainCanvas.svelte';
+	import Wordmark from '$lib/brand/Wordmark.svelte';
 
 	const CONTACT_EMAIL = 'hello@friboard.com';
 </script>
@@ -17,8 +18,10 @@
 	<RainCanvas />
 
 	<div class="content">
-		<h1 class="wordmark">FRIBOARD</h1>
-		<p class="tagline">Your CAD. Your part. Made.</p>
+		<h1 class="wordmark-wrap"><Wordmark /></h1>
+		<p class="tagline">
+			<span class="tag-accent">A —</span> Your CAD. Your part. Made.
+		</p>
 		<a class="cta" href="mailto:{CONTACT_EMAIL}">Get a quote</a>
 	</div>
 </section>
@@ -28,11 +31,12 @@
 		margin: 0;
 		padding: 0;
 		background: #0f1320;
-		color: #e9e6df;
+		color: #f3eee5;
 		font-family:
-			'Inter',
 			system-ui,
 			-apple-system,
+			'Segoe UI',
+			Roboto,
 			sans-serif;
 		-webkit-font-smoothing: antialiased;
 	}
@@ -52,25 +56,25 @@
 		z-index: 1;
 		text-align: center;
 		padding: 2rem;
-		max-width: 720px;
+		max-width: 760px;
 		text-shadow: 0 2px 18px rgba(0, 0, 0, 0.55);
 	}
 
-	.wordmark {
-		font-size: clamp(2.75rem, 9vw, 6rem);
-		font-weight: 300;
-		letter-spacing: 0.18em;
-		margin: 0 0 1.25rem;
-		color: #d4a574;
-		text-transform: uppercase;
+	.wordmark-wrap {
+		margin: 0 0 1.5rem;
 	}
 
 	.tagline {
 		font-size: clamp(1rem, 2.2vw, 1.35rem);
 		font-weight: 300;
-		letter-spacing: 0.04em;
+		letter-spacing: 0.05em;
 		margin: 0 0 2.5rem;
-		color: #cbc7bd;
+		color: #f3eee5;
+	}
+
+	.tag-accent {
+		color: #d4a574;
+		margin-right: 0.35em;
 	}
 
 	.cta {
@@ -80,7 +84,7 @@
 		color: #d4a574;
 		text-decoration: none;
 		font-size: 1rem;
-		letter-spacing: 0.08em;
+		letter-spacing: 0.1em;
 		text-transform: uppercase;
 		background: transparent;
 		transition:
@@ -100,10 +104,11 @@
 			padding: 1.25rem;
 		}
 		.tagline {
-			margin-bottom: 2rem;
+			margin: 1.25rem 0 2rem;
 		}
 		.cta {
-			padding: 0.75rem 1.75rem;
+			display: block;
+			padding: 0.85rem 1rem;
 		}
 	}
 </style>
