@@ -2,18 +2,16 @@ import type { RequestHandler } from './$types';
 import { json } from '@sveltejs/kit';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { resolve as pathResolve, join } from 'node:path';
+import { requireAdminAuth } from '$lib/server/auth';
+import { QUOTE_STATUS_SET } from '$lib/server/quote-status';
 
 const QUOTE_DIR = process.env.ABERP_SITE_QUOTE_DIR ?? './data/quotes';
-const ALLOWED_STATUS = new Set(['received', 'quoted', 'approved', 'rejected']);
 
-// NOTE (Phase 2 v1): NO AUTHENTICATION. This is an operator-pull endpoint
-// intended for localhost-only use. Production deployment MUST add an API key
-// or mTLS before exposing this to the network. Tracked for the 2.0 cutover
-// when ABERP becomes the consumer.
+export const GET: RequestHandler = async ({ url, request }) => {
+	requireAdminAuth(request);
 
-export const GET: RequestHandler = async ({ url }) => {
 	const statusFilter = url.searchParams.get('status');
-	if (statusFilter && !ALLOWED_STATUS.has(statusFilter)) {
+	if (statusFilter && !QUOTE_STATUS_SET.has(statusFilter)) {
 		return json({ error: 'Invalid status filter.' }, { status: 400 });
 	}
 
@@ -47,7 +45,6 @@ export const GET: RequestHandler = async ({ url }) => {
 			if (statusFilter && parsed.status !== statusFilter) continue;
 			quotes.push(parsed);
 		} catch {
-			// skip directories without a valid metadata.json
 			continue;
 		}
 	}

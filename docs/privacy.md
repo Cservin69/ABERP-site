@@ -33,6 +33,12 @@ If you submit a quote request via the `/quote` form, the following data is proce
 
 **Security caveats (Phase 2).** CAD files are stored on the operator instance without at-rest encryption beyond the underlying disk encryption of the host. No third-party processors receive your quote data during Phase 2. This will be tightened in Phase 3 and again at the 2.0 cutover.
 
+## Internal access (Phase 2)
+
+Quote submissions are reviewed by the Friboard operator (Ervin Áben) via an authenticated admin interface at `/admin/quotes`. Access is gated by a single shared secret token held by the operator. No other person has access to submitted quote data on the host. Subject Access Requests are fulfilled by the operator retrieving the relevant submission through that interface and emailing the requesting data subject from `hello@friboard.com`.
+
+At the 2.0 cutover, quote data ingested into ABERP becomes subject to ABERP's own access controls, which are documented separately.
+
 ## What data is NOT processed
 
 - No cookies, local storage, or session storage are set.

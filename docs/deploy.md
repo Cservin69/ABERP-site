@@ -294,11 +294,12 @@ CMD ["node", "build"]
 
 ### Env vars (Lightsail container service env)
 
-| Variable               | Purpose                                                                    |
-| ---------------------- | -------------------------------------------------------------------------- |
-| `PORT`                 | Node listen port. Default `3000`. Lightsail expects this on the container. |
-| `NODE_ENV`             | `production`.                                                              |
-| `ABERP_SITE_QUOTE_DIR` | Path where quote submissions are staged. Default `./data/quotes`.          |
+| Variable                 | Purpose                                                                                                                                                     |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`                   | Node listen port. Default `3000`. Lightsail expects this on the container.                                                                                  |
+| `NODE_ENV`               | `production`.                                                                                                                                               |
+| `ABERP_SITE_QUOTE_DIR`   | Path where quote submissions are staged. Default `./data/quotes`.                                                                                           |
+| `ABERP_SITE_ADMIN_TOKEN` | Shared secret for the `/admin` UI and the `/api/quotes*` endpoints. **Required** — server refuses to serve those paths without it. See "Admin token" below. |
 
 ### Persistent storage (REQUIRED — non-negotiable)
 
@@ -333,20 +334,38 @@ Add one extra cache behavior to the existing distribution:
 | `/quote`     | Lightsail HTTPS endpoint | CachingDisabled |
 | `/quote/*`   | Lightsail HTTPS endpoint | CachingDisabled |
 | `/api/*`     | Lightsail HTTPS endpoint | CachingDisabled |
+| `/admin`     | Lightsail HTTPS endpoint | CachingDisabled |
+| `/admin/*`   | Lightsail HTTPS endpoint | CachingDisabled |
 
-Use a managed origin request policy that forwards all viewer headers, cookies, and query params. Disable caching for the dynamic surface — the form is per-session and the API is non-idempotent.
+Use a managed origin request policy that forwards all viewer headers, cookies, and query params. Disable caching for the dynamic surface — the form is per-session, the API is non-idempotent, and the admin UI is per-operator-cookie.
 
-The Phase 1 viewer-request function (rewriting `/privacy` → `/privacy.html`) **must not** rewrite `/quote` or `/api/*`. Update the function so the rewrite is only applied to the explicit prerendered paths.
+The Phase 1 viewer-request function (rewriting `/privacy` → `/privacy.html`) **must not** rewrite `/quote`, `/api/*`, or `/admin*`. Update the function so the rewrite is only applied to the explicit prerendered paths.
 
-### Operator-pull endpoint security caveat
+### Admin token
 
-`GET /api/quotes` lists every submitted quote and returns full metadata (including customer name, email, and the file list). **It has no authentication in Phase 2 v1.** Before exposing the dynamic surface to the internet:
+The `/admin` browser UI and all `/api/quotes*` endpoints are gated by a single bearer token, set via `ABERP_SITE_ADMIN_TOKEN`. The server refuses to serve any of those paths if the env var is unset (a `503 Server is not configured` is returned, code-enforced — there is no fallback to "open" behaviour).
 
-1. Restrict the CloudFront origin to require a custom header (e.g. `X-Friboard-Auth`) that the Lightsail app validates, OR
-2. Add a per-request API key check on `/api/quotes` (single shared secret in env), OR
-3. Block `/api/quotes` at the CloudFront edge entirely and tunnel into Lightsail over SSM/SSH to fetch.
+Generate a token locally and set it on the Lightsail container or instance env (NOT committed to the repo):
 
-Option 2 is the cheapest stop-gap. Authentication design is finalised at the 2.0 cutover when ABERP becomes the consumer.
+```sh
+openssl rand -hex 32
+# → e.g. 4f1c0b9...   set as ABERP_SITE_ADMIN_TOKEN
+```
+
+Two access paths share the same token:
+
+- **Browser admin (operator)** — `/admin/login` accepts the token as a form field and sets an `HttpOnly; SameSite=Strict; Secure` cookie (`Secure` is set in production builds; the dev build sets `Secure=false` so it works over `http://localhost`). The cookie expires after 12 hours.
+- **Server-to-server (ABERP polling, S210)** — pass `Authorization: Bearer <token>` on every request to `/api/quotes`, `/api/quotes/<id>`, `/api/quotes/<id>/status`, and `/api/quotes/<id>/files/<filename>`.
+
+**Token rotation.** Update the env var on the host and restart the Node process (the dev-machine equivalent is killing `node build` and re-running with the new value). The browser will need to sign in again; the ABERP-side config must be updated in lock-step. Pre-2.0 there is only one operator and one consumer, so this is a coordinated change rather than an automated rollover.
+
+**`POST /api/quote` is intentionally unauthenticated** — it is the public-facing quote form endpoint. Only the read-side (`GET /api/quotes*`) and the mutation endpoints (`POST /api/quotes/<id>/status`) require the bearer token.
+
+`/admin/login` is reachable from anywhere by URL — there is no public link to it from the marketing surface. Operators bookmark it directly. This is a low-effort obscurity layer on top of the cryptographic gate; do not rely on it for security.
+
+### Operator-pull endpoint security caveat (resolved in S209)
+
+Phase 2 v1 (S208) shipped `GET /api/quotes` without authentication. S209 closes that hole — all `/api/quotes*` endpoints now require `Authorization: Bearer <ABERP_SITE_ADMIN_TOKEN>`. The CloudFront-edge custom-header stop-gap is no longer required, but is still acceptable as defence-in-depth.
 
 ### Pre-deploy build sanity (Phase 2 addendum)
 
@@ -376,7 +395,7 @@ rm -rf /tmp/aberp-smoke
 
 The following are deferred to Phase 3:
 
-- **Authentication on `/api/quotes`** — Phase 2 v1 is localhost-only, then guarded at the CloudFront edge by a custom header on the first internet deploy. Real auth lands at the 2.0 cutover when ABERP polls.
+- **Authentication on `/api/quotes`** — addressed in S209: a single shared bearer token (`ABERP_SITE_ADMIN_TOKEN`) gates the read endpoints, the status mutation endpoint, the file download endpoint, and the `/admin` UI. Multi-operator / per-user identity is still deferred to the 2.0 cutover.
 - **Virus / malware scanning of uploaded CAD** — defer until upload volume justifies a ClamAV sidecar or a third-party scan API.
 - **Rate limiting on `POST /api/quote`** — would need a shared KV store (Redis / DynamoDB). Defer; CloudFront WAF rate limit is the cheap stop-gap if abuse appears.
 - **Encryption at rest beyond underlying disk encryption** — CAD-as-IP risk is acknowledged; per-quote envelope encryption is a Phase 3 design item.
