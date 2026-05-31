@@ -37,6 +37,14 @@ export default defineConfig(
 		}
 	},
 	{
+		// Vendored RainEffect source (codrops, MIT-style; see src/lib/rain-effect/LICENSE).
+		// Uses pseudo-class prototypes that don't fit checkJs cleanly — @ts-nocheck is intentional.
+		files: ['src/lib/rain-effect/*.js'],
+		rules: {
+			'@typescript-eslint/ban-ts-comment': 'off'
+		}
+	},
+	{
 		// Override or add rule settings here, such as:
 		// 'svelte/button-has-type': 'error'
 		rules: {}

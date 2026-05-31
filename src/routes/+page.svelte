@@ -1,4 +1,6 @@
 <script lang="ts">
+	import RainCanvas from '$lib/rain-effect/RainCanvas.svelte';
+
 	const CONTACT_EMAIL = 'hello@friboard.com';
 </script>
 
@@ -12,8 +14,7 @@
 </svelte:head>
 
 <section class="hero">
-	<!-- Rain WebGL canvas will mount here in Session 205 -->
-	<div class="rain-placeholder" aria-hidden="true"></div>
+	<RainCanvas />
 
 	<div class="content">
 		<h1 class="wordmark">FRIBOARD</h1>
@@ -46,19 +47,13 @@
 		overflow: hidden;
 	}
 
-	.rain-placeholder {
-		position: absolute;
-		inset: 0;
-		background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
-		z-index: 0;
-	}
-
 	.content {
 		position: relative;
 		z-index: 1;
 		text-align: center;
 		padding: 2rem;
 		max-width: 720px;
+		text-shadow: 0 2px 18px rgba(0, 0, 0, 0.55);
 	}
 
 	.wordmark {

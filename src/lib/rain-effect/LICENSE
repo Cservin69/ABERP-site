@@ -1,0 +1,27 @@
+The WebGL rain/water effect in this directory (raindrops.js, rain-renderer.js,
+gl-obj.js, webgl.js, util.js, shaders/*.vert, shaders/*.frag, assets/*.png) is
+vendored and adapted from:
+
+    Rain & Water Effect Experiments by Lucas Bebber
+    https://github.com/codrops/RainEffect
+    Article: http://tympanus.net/codrops/?p=25417
+
+Original license, from the Codrops repository README:
+
+    "Integrate or build upon it for free in your personal or commercial
+     projects. Don't republish, redistribute or sell 'as-is'."
+
+    Full Codrops license terms: http://tympanus.net/codrops/licensing/
+
+This project (ABERP-site / Friboard) integrates the effect into a SvelteKit
+landing page. The original source has been adapted to:
+
+  - run as ES2015 modules (no Browserify/Gulp bundle)
+  - inline shaders as strings (no glslify build step)
+  - bundle textures via Vite asset URLs (no runtime /img path)
+  - drop the weather-slideshow / parallax / lightning-flash code paths
+  - expose an initRain(canvas) / destroy() API for SPA mounting
+  - remove the GSAP and core-js runtime dependencies
+
+Per the license terms above, this is permitted integration, not republication.
+The vendored adaptation is not offered as a standalone library.
