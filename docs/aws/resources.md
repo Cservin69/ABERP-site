@@ -8,19 +8,19 @@ run with elevated perms ("Fixup pass" below).
 
 ## 1. Resources provisioned
 
-| Resource                | Identifier / ARN                                                                              |
-| ----------------------- | --------------------------------------------------------------------------------------------- |
-| AWS account             | `499579792018`                                                                                |
-| Primary region          | `eu-central-1`                                                                                |
-| GitHub OIDC provider    | `arn:aws:iam::499579792018:oidc-provider/token.actions.githubusercontent.com`                 |
-| S3 static bucket        | `friboard-static-499579792018` (eu-central-1, BPA all-on, versioning on, SSE-S3 AWS default)  |
-| CloudFront OAC          | `E6120TF7OFMWK` (name `friboard-static-oac`, sigv4 / always, type `s3`)                       |
-| CloudFront distribution | `E1VSUFKSGDSVFI` — `d1dvryarslcf0d.cloudfront.net` (no aliases yet — see Fixup §3.2)          |
-| CloudFront dist ARN     | `arn:aws:cloudfront::499579792018:distribution/E1VSUFKSGDSVFI`                                |
-| S3 bucket policy        | Attached: CloudFront service principal, `s3:GetObject`, SourceArn pinned to `E1VSUFKSGDSVFI`  |
-| Placeholder content     | `s3://friboard-static-499579792018/index.html` (849 B "provisioning" landing)                 |
+| Resource                | Identifier / ARN                                                                               |
+| ----------------------- | ---------------------------------------------------------------------------------------------- |
+| AWS account             | `499579792018`                                                                                 |
+| Primary region          | `eu-central-1`                                                                                 |
+| GitHub OIDC provider    | `arn:aws:iam::499579792018:oidc-provider/token.actions.githubusercontent.com`                  |
+| S3 static bucket        | `friboard-static-499579792018` (eu-central-1, BPA all-on, versioning on, SSE-S3 AWS default)   |
+| CloudFront OAC          | `E6120TF7OFMWK` (name `friboard-static-oac`, sigv4 / always, type `s3`)                        |
+| CloudFront distribution | `E1VSUFKSGDSVFI` — `d1dvryarslcf0d.cloudfront.net` (no aliases yet — see Fixup §3.2)           |
+| CloudFront dist ARN     | `arn:aws:cloudfront::499579792018:distribution/E1VSUFKSGDSVFI`                                 |
+| S3 bucket policy        | Attached: CloudFront service principal, `s3:GetObject`, SourceArn pinned to `E1VSUFKSGDSVFI`   |
+| Placeholder content     | `s3://friboard-static-499579792018/index.html` (849 B "provisioning" landing)                  |
 | ACM cert (us-east-1)    | `arn:aws:acm:us-east-1:499579792018:certificate/babaa745-3919-4000-aff5-7b716e97a656` — ISSUED |
-| Route 53 hosted zone    | `Z07478311YU5K6F60V9V6` (`friboard.com.`)                                                     |
+| Route 53 hosted zone    | `Z07478311YU5K6F60V9V6` (`friboard.com.`)                                                      |
 
 ## 2. GitHub repo Variables (paste block)
 
@@ -28,18 +28,18 @@ run with elevated perms ("Fixup pass" below).
 **Variables** tab. Set all four (the deploy-dynamic job is guarded to skip when
 `ABERP_SITE_LS_INSTANCE` is empty — see `.github/workflows/deploy.yml`):
 
-| Variable                 | Value                                                              |
-| ------------------------ | ------------------------------------------------------------------ |
-| `AWS_DEPLOY_ROLE_ARN`    | `arn:aws:iam::499579792018:role/aberp-site-github-deploy`          |
-| `ABERP_SITE_BUCKET`      | `friboard-static-499579792018`                                     |
-| `ABERP_SITE_CF_DIST`     | `E1VSUFKSGDSVFI`                                                   |
-| `ABERP_SITE_LS_INSTANCE` | _(leave UNSET until Phase 5; the workflow skips deploy-dynamic)_   |
+| Variable                 | Value                                                            |
+| ------------------------ | ---------------------------------------------------------------- |
+| `AWS_DEPLOY_ROLE_ARN`    | `arn:aws:iam::499579792018:role/aberp-site-github-deploy`        |
+| `ABERP_SITE_BUCKET`      | `friboard-static-499579792018`                                   |
+| `ABERP_SITE_CF_DIST`     | `E1VSUFKSGDSVFI`                                                 |
+| `ABERP_SITE_LS_INSTANCE` | _(leave UNSET until Phase 5; the workflow skips deploy-dynamic)_ |
 
 ## 3. Fixup pass — Ervin to run with elevated perms
 
 The `friboard-operator` IAM user is scoped tightly enough that three things in
-the original plan came back AccessDenied. None of them are blocking *for the
-static stack to be wired up*, but the first two **must** be done before the
+the original plan came back AccessDenied. None of them are blocking _for the
+static stack to be wired up_, but the first two **must** be done before the
 first `git push` to `main` actually deploys. The third is needed before
 friboard.com itself works (until then, `d1dvryarslcf0d.cloudfront.net` serves
 the placeholder fine, but the apex/www DNS still point at the foreign stale
@@ -171,25 +171,25 @@ reviewer approval before AWS creds are minted).
 
 ```json
 {
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Federated": "arn:aws:iam::499579792018:oidc-provider/token.actions.githubusercontent.com"
-      },
-      "Action": "sts:AssumeRoleWithWebIdentity",
-      "Condition": {
-        "StringEquals": {
-          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-          "token.actions.githubusercontent.com:sub": [
-            "repo:Cservin69/ABERP-site:ref:refs/heads/main",
-            "repo:Cservin69/ABERP-site:environment:production"
-          ]
-        }
-      }
-    }
-  ]
+	"Version": "2012-10-17",
+	"Statement": [
+		{
+			"Effect": "Allow",
+			"Principal": {
+				"Federated": "arn:aws:iam::499579792018:oidc-provider/token.actions.githubusercontent.com"
+			},
+			"Action": "sts:AssumeRoleWithWebIdentity",
+			"Condition": {
+				"StringEquals": {
+					"token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+					"token.actions.githubusercontent.com:sub": [
+						"repo:Cservin69/ABERP-site:ref:refs/heads/main",
+						"repo:Cservin69/ABERP-site:environment:production"
+					]
+				}
+			}
+		}
+	]
 }
 ```
 
@@ -203,50 +203,46 @@ workflow can self-check identity if needed.
 
 ```json
 {
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "S3SyncStaticAndStageRelease",
-      "Effect": "Allow",
-      "Action": [
-        "s3:PutObject",
-        "s3:PutObjectAcl",
-        "s3:GetObject",
-        "s3:DeleteObject",
-        "s3:ListBucket"
-      ],
-      "Resource": [
-        "arn:aws:s3:::friboard-static-499579792018",
-        "arn:aws:s3:::friboard-static-499579792018/*"
-      ]
-    },
-    {
-      "Sid": "CloudFrontInvalidate",
-      "Effect": "Allow",
-      "Action": "cloudfront:CreateInvalidation",
-      "Resource": "arn:aws:cloudfront::499579792018:distribution/E1VSUFKSGDSVFI"
-    },
-    {
-      "Sid": "SSMDeployToLightsailPhase5",
-      "Effect": "Allow",
-      "Action": [
-        "ssm:SendCommand",
-        "ssm:ListCommandInvocations",
-        "ssm:GetCommandInvocation"
-      ],
-      "Resource": [
-        "arn:aws:ec2:eu-central-1:499579792018:instance/*",
-        "arn:aws:ssm:eu-central-1:499579792018:managed-instance/*",
-        "arn:aws:ssm:eu-central-1::document/AWS-RunShellScript"
-      ]
-    },
-    {
-      "Sid": "STSSelfCheck",
-      "Effect": "Allow",
-      "Action": "sts:GetCallerIdentity",
-      "Resource": "*"
-    }
-  ]
+	"Version": "2012-10-17",
+	"Statement": [
+		{
+			"Sid": "S3SyncStaticAndStageRelease",
+			"Effect": "Allow",
+			"Action": [
+				"s3:PutObject",
+				"s3:PutObjectAcl",
+				"s3:GetObject",
+				"s3:DeleteObject",
+				"s3:ListBucket"
+			],
+			"Resource": [
+				"arn:aws:s3:::friboard-static-499579792018",
+				"arn:aws:s3:::friboard-static-499579792018/*"
+			]
+		},
+		{
+			"Sid": "CloudFrontInvalidate",
+			"Effect": "Allow",
+			"Action": "cloudfront:CreateInvalidation",
+			"Resource": "arn:aws:cloudfront::499579792018:distribution/E1VSUFKSGDSVFI"
+		},
+		{
+			"Sid": "SSMDeployToLightsailPhase5",
+			"Effect": "Allow",
+			"Action": ["ssm:SendCommand", "ssm:ListCommandInvocations", "ssm:GetCommandInvocation"],
+			"Resource": [
+				"arn:aws:ec2:eu-central-1:499579792018:instance/*",
+				"arn:aws:ssm:eu-central-1:499579792018:managed-instance/*",
+				"arn:aws:ssm:eu-central-1::document/AWS-RunShellScript"
+			]
+		},
+		{
+			"Sid": "STSSelfCheck",
+			"Effect": "Allow",
+			"Action": "sts:GetCallerIdentity",
+			"Resource": "*"
+		}
+	]
 }
 ```
 
