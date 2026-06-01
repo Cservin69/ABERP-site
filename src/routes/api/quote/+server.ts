@@ -66,6 +66,15 @@ export const POST: RequestHandler = async ({ request }) => {
 		return bad('Invalid form data.');
 	}
 
+	// Honeypot: a hidden `website` field on the form. Real users never see it
+	// (CSS-hidden, tabindex=-1, aria-hidden). Bots that auto-fill every input
+	// will populate it. Silently 200-OK without writing anything so the bot
+	// thinks the submission succeeded but we never persist or notify.
+	const honeypot = getField(form, 'website');
+	if (honeypot !== null && honeypot.trim().length > 0) {
+		return json({ id: randomUUID(), status: 'received' });
+	}
+
 	const name = getField(form, 'name');
 	const email = getField(form, 'email');
 	const company = getField(form, 'company') ?? '';

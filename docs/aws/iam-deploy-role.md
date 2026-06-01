@@ -39,8 +39,10 @@ Identity providers → Add provider → OpenID Connect, URL
 
 ### Trust policy
 
-Save to `trust-policy.json`. The `sub` condition scopes the role so only
-workflow runs on branches/tags in `Cservin69/ABERP-site` can assume it.
+Save to `trust-policy.json`. Both `aud` and `sub` use `StringEquals` so the role
+is assumable **only** from workflow runs on `main` or in the `production`
+environment of `Cservin69/ABERP-site` — not from PR branches, forks, tags, or
+unrelated repos.
 
 ```json
 {
@@ -54,10 +56,11 @@ workflow runs on branches/tags in `Cservin69/ABERP-site` can assume it.
 			"Action": "sts:AssumeRoleWithWebIdentity",
 			"Condition": {
 				"StringEquals": {
-					"token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
-				},
-				"StringLike": {
-					"token.actions.githubusercontent.com:sub": "repo:Cservin69/ABERP-site:*"
+					"token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+					"token.actions.githubusercontent.com:sub": [
+						"repo:Cservin69/ABERP-site:ref:refs/heads/main",
+						"repo:Cservin69/ABERP-site:environment:production"
+					]
 				}
 			}
 		}
@@ -65,15 +68,20 @@ workflow runs on branches/tags in `Cservin69/ABERP-site` can assume it.
 }
 ```
 
-Tighter alternative (recommended once first deploy works): replace the wildcard
-`sub` with explicit refs you want to allow:
+Why both `sub` values:
 
-```json
-"token.actions.githubusercontent.com:sub": [
-  "repo:Cservin69/ABERP-site:ref:refs/heads/main",
-  "repo:Cservin69/ABERP-site:environment:production"
-]
-```
+- `…:ref:refs/heads/main` covers the `build` job in `deploy.yml`, which runs
+  without a GitHub environment.
+- `…:environment:production` covers the `deploy-static` and `deploy-dynamic`
+  jobs, which run under the `production` environment (configured with required
+  reviewer = Ervin). Even an attacker who pushed straight to `main` would still
+  block at the human-approval gate before AWS credentials are issued.
+
+If you ever need to debug a workflow run from a non-main branch (e.g. testing
+trust-policy changes), temporarily add
+`repo:Cservin69/ABERP-site:ref:refs/heads/<your-branch>` to the array and remove
+it once the test is done. Never expand to `repo:Cservin69/ABERP-site:*` — that
+re-opens the role to any PR branch.
 
 ### Permissions policy
 

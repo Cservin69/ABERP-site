@@ -1,0 +1,41 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: Europe/Budapest
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    groups:
+      sveltekit:
+        patterns:
+          - '@sveltejs/*'
+          - 'svelte'
+          - 'svelte-*'
+      lint-and-test:
+        patterns:
+          - 'eslint*'
+          - '@eslint/*'
+          - 'prettier*'
+          - 'vitest'
+          - '@playwright/*'
+      types:
+        patterns:
+          - '@types/*'
+          - 'typescript*'
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: Europe/Budapest
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - ci

@@ -8,6 +8,10 @@ Type=simple
 User=aberp
 Group=aberp
 WorkingDirectory=/home/aberp/current
+# Default to a 50 MB request-body cap so adapter-node's stock 512 KB limit does
+# not silently 413 every CAD upload. EnvironmentFile values override this if the
+# operator sets BODY_SIZE_LIMIT explicitly in /etc/aberp-site.env.
+Environment=BODY_SIZE_LIMIT=52428800
 EnvironmentFile=/etc/aberp-site.env
 ExecStart=/usr/bin/node build
 Restart=on-failure

@@ -41,22 +41,22 @@ The top hardening priorities are in §5.
 
 ## 2. Inventory — what protections exist today
 
-| File | Protections present | Evidence |
-| --- | --- | --- |
-| `src/routes/api/quote/+server.ts` (public POST) | Extension allowlist; per-field length caps; header-injection regex; email regex; UUID v4 id; sanitized filename (alphanum/`._-` only); per-quote dir path-traversal guard; collision-resilient filename de-dupe. | lines 12–27 (ext), 38–41 (regexes), 87–105 (caps + validation), 133–137 (path resolve), 54–59 (sanitize), 144–158 (dedup + traversal recheck). |
-| `src/routes/api/quotes/+server.ts` (operator list) | Bearer auth, status-filter allowlist, path-traversal guard on dir walk, swallow-and-continue on bad metadata. | lines 11, 14, 32. |
-| `src/routes/api/quotes/[id]/+server.ts` (operator single) | Bearer auth before UUID check (no oracle), UUID v4 regex, 404 on miss. | lines 9–13. |
-| `src/routes/api/quotes/[id]/files/[filename]/+server.ts` (operator download) | Bearer auth; UUID + filename regex; membership check against `metadata.files`; resolved-path containment check; `Content-Disposition: attachment`; `Cache-Control: private, no-store`. | lines 13–48. |
-| `src/routes/api/quotes/[id]/status/+server.ts` (operator JSON mutate) | Bearer auth; UUID regex; JSON-body validation; status allowlist; notes length + header-injection cap; atomic write; append-only `status_history` entry. | lines 13, 16, 30–43, 50–59. |
-| `src/lib/server/auth.ts` | `timingSafeEqual` on bearer + cookie; refuse-to-start 503 if env unset; HttpOnly + SameSite=Strict cookie; `secure: !dev` set on login. | lines 8–20, 75–83. |
-| `src/lib/server/quote-store.ts` | `pathResolve` containment check on `quoteDir` and `quoteFilePath`; atomic rename via `metadata.json.tmp-<uuid>`. | lines 44–50, 90–97, 99–106. |
-| `src/routes/admin/+layout.server.ts` | Cookie gate for ALL `/admin/*` GETs except `/admin/login`; 303 redirect with `next=` round-tripper. | lines 9–16. |
-| `src/routes/admin/login/+page.server.ts` | Form-action takes plaintext token, `checkLogin` uses timing-safe compare, sets cookie with `secure: !dev`. | lines 17–34. |
-| `src/hooks.server.ts` (PR-A) | `X-CloudFront-Secret` origin-auth on every request except `/healthz`; `timingSafeEqual` on the secret. | lines 31–46. |
-| `svelte.config.js` | adapter-node only; `csrf.checkOrigin` defaults to `true` (verified in `@sveltejs/kit` config schema). | line 9. |
-| `.github/workflows/deploy.yml` | OIDC role assumption; explicit `id-token: write` + `contents: read` only; least-privilege IAM (`docs/aws/iam-deploy-role.md`); separated build/static/dynamic jobs; SHA-tagged tarball. | lines 20–22, 65–67. |
-| `docs/aws/aberp-site.service` | systemd hardening: `NoNewPrivileges=true`, `ProtectSystem=strict`, `ProtectHome=read-only`, `PrivateTmp=true`, narrow `ReadWritePaths`. | lines 22–27. |
-| `docs/privacy.md` | GDPR Art. 6(1)(b) lawful basis stated; subject-rights list; controller named; retention deferred with caveat documented; CAD-as-IP flagged. | lines 16–34, 49–74. |
+| File                                                                         | Protections present                                                                                                                                                                                              | Evidence                                                                                                                                       |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/routes/api/quote/+server.ts` (public POST)                              | Extension allowlist; per-field length caps; header-injection regex; email regex; UUID v4 id; sanitized filename (alphanum/`._-` only); per-quote dir path-traversal guard; collision-resilient filename de-dupe. | lines 12–27 (ext), 38–41 (regexes), 87–105 (caps + validation), 133–137 (path resolve), 54–59 (sanitize), 144–158 (dedup + traversal recheck). |
+| `src/routes/api/quotes/+server.ts` (operator list)                           | Bearer auth, status-filter allowlist, path-traversal guard on dir walk, swallow-and-continue on bad metadata.                                                                                                    | lines 11, 14, 32.                                                                                                                              |
+| `src/routes/api/quotes/[id]/+server.ts` (operator single)                    | Bearer auth before UUID check (no oracle), UUID v4 regex, 404 on miss.                                                                                                                                           | lines 9–13.                                                                                                                                    |
+| `src/routes/api/quotes/[id]/files/[filename]/+server.ts` (operator download) | Bearer auth; UUID + filename regex; membership check against `metadata.files`; resolved-path containment check; `Content-Disposition: attachment`; `Cache-Control: private, no-store`.                           | lines 13–48.                                                                                                                                   |
+| `src/routes/api/quotes/[id]/status/+server.ts` (operator JSON mutate)        | Bearer auth; UUID regex; JSON-body validation; status allowlist; notes length + header-injection cap; atomic write; append-only `status_history` entry.                                                          | lines 13, 16, 30–43, 50–59.                                                                                                                    |
+| `src/lib/server/auth.ts`                                                     | `timingSafeEqual` on bearer + cookie; refuse-to-start 503 if env unset; HttpOnly + SameSite=Strict cookie; `secure: !dev` set on login.                                                                          | lines 8–20, 75–83.                                                                                                                             |
+| `src/lib/server/quote-store.ts`                                              | `pathResolve` containment check on `quoteDir` and `quoteFilePath`; atomic rename via `metadata.json.tmp-<uuid>`.                                                                                                 | lines 44–50, 90–97, 99–106.                                                                                                                    |
+| `src/routes/admin/+layout.server.ts`                                         | Cookie gate for ALL `/admin/*` GETs except `/admin/login`; 303 redirect with `next=` round-tripper.                                                                                                              | lines 9–16.                                                                                                                                    |
+| `src/routes/admin/login/+page.server.ts`                                     | Form-action takes plaintext token, `checkLogin` uses timing-safe compare, sets cookie with `secure: !dev`.                                                                                                       | lines 17–34.                                                                                                                                   |
+| `src/hooks.server.ts` (PR-A)                                                 | `X-CloudFront-Secret` origin-auth on every request except `/healthz`; `timingSafeEqual` on the secret.                                                                                                           | lines 31–46.                                                                                                                                   |
+| `svelte.config.js`                                                           | adapter-node only; `csrf.checkOrigin` defaults to `true` (verified in `@sveltejs/kit` config schema).                                                                                                            | line 9.                                                                                                                                        |
+| `.github/workflows/deploy.yml`                                               | OIDC role assumption; explicit `id-token: write` + `contents: read` only; least-privilege IAM (`docs/aws/iam-deploy-role.md`); separated build/static/dynamic jobs; SHA-tagged tarball.                          | lines 20–22, 65–67.                                                                                                                            |
+| `docs/aws/aberp-site.service`                                                | systemd hardening: `NoNewPrivileges=true`, `ProtectSystem=strict`, `ProtectHome=read-only`, `PrivateTmp=true`, narrow `ReadWritePaths`.                                                                          | lines 22–27.                                                                                                                                   |
+| `docs/privacy.md`                                                            | GDPR Art. 6(1)(b) lawful basis stated; subject-rights list; controller named; retention deferred with caveat documented; CAD-as-IP flagged.                                                                      | lines 16–34, 49–74.                                                                                                                            |
 
 ---
 
@@ -70,16 +70,16 @@ upload audit log, separate processing service.
 
 **Verdict: 🟡 PARTIALLY ADDRESSED.**
 
-| Sub-control | Status | Evidence |
-| --- | --- | --- |
-| Size limits | ✓ | 50 MB total, 10-file cap, per-file empty-file reject. `+server.ts:117–131`. |
-| Filename sanitization | ✓ | `sanitizeFilename` strips to `[A-Za-z0-9._-]`, slices to 200 chars, replaces leading dots, falls back to `unnamed`. Path-traversal recheck on resolved dest. `+server.ts:54–59, 144–158`. RTL Unicode overrides get stripped to `_` — no bypass. |
-| UUID-based storage | 🟡 | The **directory** is a UUID; the **file** keeps its (sanitized) original name. Reviewer's stronger form (store-as-UUID, keep originals only in metadata.json) would harden against any future filename-driven attack at read time. Currently mitigated by the file-download endpoint's regex + membership check. |
-| Magic-byte validation | 🔴 | Not done. Extension allowlist only. A `.step` file containing arbitrary bytes is accepted. Low risk because CAD files never auto-execute in the manufacturing pipeline (see §6). |
-| Quarantine flow | 🔴 | All quotes land in `received` and are visible to the operator immediately. There is no `quarantined` → `cleared` state machine. Defer — see §6. |
-| Encryption at rest | 🔴 | Underlying disk encryption only (Lightsail attached block storage). No envelope encryption. Explicitly deferred to Phase 3 in `docs/deploy.md:401`. |
-| Upload audit log | 🟡 | `received_at` + `consent_at` captured on the metadata; `status_history` captures subsequent mutations. **No** separate append-only audit log; metadata.json itself is mutable by anyone with disk write (and by the buggy form action — see §4 #1). |
-| Separate processing service | 🔴 | Out of scope at v1. The CAD never reaches an automated pipeline; operator manually opens it. |
+| Sub-control                 | Status | Evidence                                                                                                                                                                                                                                                                                                         |
+| --------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Size limits                 | ✓      | 50 MB total, 10-file cap, per-file empty-file reject. `+server.ts:117–131`.                                                                                                                                                                                                                                      |
+| Filename sanitization       | ✓      | `sanitizeFilename` strips to `[A-Za-z0-9._-]`, slices to 200 chars, replaces leading dots, falls back to `unnamed`. Path-traversal recheck on resolved dest. `+server.ts:54–59, 144–158`. RTL Unicode overrides get stripped to `_` — no bypass.                                                                 |
+| UUID-based storage          | 🟡     | The **directory** is a UUID; the **file** keeps its (sanitized) original name. Reviewer's stronger form (store-as-UUID, keep originals only in metadata.json) would harden against any future filename-driven attack at read time. Currently mitigated by the file-download endpoint's regex + membership check. |
+| Magic-byte validation       | 🔴     | Not done. Extension allowlist only. A `.step` file containing arbitrary bytes is accepted. Low risk because CAD files never auto-execute in the manufacturing pipeline (see §6).                                                                                                                                 |
+| Quarantine flow             | 🔴     | All quotes land in `received` and are visible to the operator immediately. There is no `quarantined` → `cleared` state machine. Defer — see §6.                                                                                                                                                                  |
+| Encryption at rest          | 🔴     | Underlying disk encryption only (Lightsail attached block storage). No envelope encryption. Explicitly deferred to Phase 3 in `docs/deploy.md:401`.                                                                                                                                                              |
+| Upload audit log            | 🟡     | `received_at` + `consent_at` captured on the metadata; `status_history` captures subsequent mutations. **No** separate append-only audit log; metadata.json itself is mutable by anyone with disk write (and by the buggy form action — see §4 #1).                                                              |
+| Separate processing service | 🔴     | Out of scope at v1. The CAD never reaches an automated pipeline; operator manually opens it.                                                                                                                                                                                                                     |
 
 ### Finding 2 — Public quote form, Medium-High
 
@@ -88,15 +88,15 @@ protection, data minimization, GDPR consent, audit ledger, retention policy.
 
 **Verdict: 🟡 PARTIALLY ADDRESSED.**
 
-| Sub-control | Status | Evidence |
-| --- | --- | --- |
+| Sub-control            | Status                                                                                                                                                                                                                                                                                                     | Evidence                                                                                                                                                                                            |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | SvelteKit form actions | ⚠️ partial — the public form uses `fetch('/api/quote', …)` (not a `+page.server.ts` action). Functionally equivalent — same CSRF origin check applies since the body is `multipart/form-data`. The reviewer's recommendation reflects a stylistic preference, not a security gap. `quote/+page.svelte:78`. |
-| Rate limiting | 🔴 | Not implemented. Explicitly deferred in `docs/deploy.md:400`. CloudFront WAF rate-limit rule is named as the stop-gap but not yet configured. |
-| Bot protection | 🔴 | No CAPTCHA, no honeypot, no proof-of-work. Easiest add: a hidden honeypot field. |
-| Data minimization | ✓ | Only `name`, `email`, `consent` are required. Company, material, quantity, deadline, notes are all optional. No tracking pixels or third-party fingerprinting. |
-| GDPR consent capture | ✓ | `consent === 'true'` is required; `consent_at` ISO timestamp stored alongside the record. Privacy policy linked from the form. `+server.ts:80, 184; +page.svelte:242–249`. |
-| Audit ledger | 🟡 | `received_at` + `status_history` is the de-facto audit trail. Not append-only at the FS level (the file is rewritten on each status change); a hash-chain or write-once log would be the next step. |
-| Retention policy | 🟡 | Documented as "operator-determined, pending finalisation" (`docs/privacy.md:28`). No automated TTL. Defer per `deploy.md:402`. |
+| Rate limiting          | 🔴                                                                                                                                                                                                                                                                                                         | Not implemented. Explicitly deferred in `docs/deploy.md:400`. CloudFront WAF rate-limit rule is named as the stop-gap but not yet configured.                                                       |
+| Bot protection         | 🔴                                                                                                                                                                                                                                                                                                         | No CAPTCHA, no honeypot, no proof-of-work. Easiest add: a hidden honeypot field.                                                                                                                    |
+| Data minimization      | ✓                                                                                                                                                                                                                                                                                                          | Only `name`, `email`, `consent` are required. Company, material, quantity, deadline, notes are all optional. No tracking pixels or third-party fingerprinting.                                      |
+| GDPR consent capture   | ✓                                                                                                                                                                                                                                                                                                          | `consent === 'true'` is required; `consent_at` ISO timestamp stored alongside the record. Privacy policy linked from the form. `+server.ts:80, 184; +page.svelte:242–249`.                          |
+| Audit ledger           | 🟡                                                                                                                                                                                                                                                                                                         | `received_at` + `status_history` is the de-facto audit trail. Not append-only at the FS level (the file is rewritten on each status change); a hash-chain or write-once log would be the next step. |
+| Retention policy       | 🟡                                                                                                                                                                                                                                                                                                         | Documented as "operator-determined, pending finalisation" (`docs/privacy.md:28`). No automated TTL. Defer per `deploy.md:402`.                                                                      |
 
 ### Finding 3 — Auth & authz, Medium
 
@@ -105,14 +105,14 @@ Secure cookies; future customer accounts need proper auth; log admin actions.
 
 **Verdict: 🟡 PARTIALLY ADDRESSED.**
 
-| Sub-control | Status | Evidence |
-| --- | --- | --- |
-| HttpOnly cookie | ✓ | `auth.ts:78`. |
-| SameSite=Strict | ✓ | `auth.ts:79`. |
-| Secure flag in production | ✓ | `auth.ts:80` uses `secure: !dev`; login server passes `!dev` via `setAdminCookie(cookies, submitted, !dev)`. `login/+page.server.ts:31`. |
-| Session-based (cookie value ≠ secret) | 🔴 | The cookie value **is** the admin token, not a session ID. Stealing the cookie = stealing the secret. Rotation kills all sessions everywhere (browser + ABERP polling, since they share the secret). Acceptable for a single-operator MVP; needs a real session-store before multi-operator. |
-| Future customer auth | 🔴 / N/A | Out of scope; no customer accounts in Phase 2. |
-| Admin action logging | 🔴 | No structured admin-action log. `status_history` captures the *result* of an admin mutation, but the actor identity is fixed-by-construction (single operator) and the IP/UA isn't recorded. |
+| Sub-control                           | Status   | Evidence                                                                                                                                                                                                                                                                                     |
+| ------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| HttpOnly cookie                       | ✓        | `auth.ts:78`.                                                                                                                                                                                                                                                                                |
+| SameSite=Strict                       | ✓        | `auth.ts:79`.                                                                                                                                                                                                                                                                                |
+| Secure flag in production             | ✓        | `auth.ts:80` uses `secure: !dev`; login server passes `!dev` via `setAdminCookie(cookies, submitted, !dev)`. `login/+page.server.ts:31`.                                                                                                                                                     |
+| Session-based (cookie value ≠ secret) | 🔴       | The cookie value **is** the admin token, not a session ID. Stealing the cookie = stealing the secret. Rotation kills all sessions everywhere (browser + ABERP polling, since they share the secret). Acceptable for a single-operator MVP; needs a real session-store before multi-operator. |
+| Future customer auth                  | 🔴 / N/A | Out of scope; no customer accounts in Phase 2.                                                                                                                                                                                                                                               |
+| Admin action logging                  | 🔴       | No structured admin-action log. `status_history` captures the _result_ of an admin mutation, but the actor identity is fixed-by-construction (single operator) and the IP/UA isn't recorded.                                                                                                 |
 
 ### Finding 4 — Infra hardening, Medium
 
@@ -123,14 +123,14 @@ encryption at rest; npm audit / Dependabot.
 
 **Verdict: 🟡 PARTIALLY ADDRESSED.**
 
-| Sub-control | Status | Evidence |
-| --- | --- | --- |
-| Security response headers via CloudFront | 🔴 | `docs/aws/cloudfront-behaviors.md` does not mention a CloudFront Response Headers Policy. Nothing in the code or docs adds CSP / X-Content-Type-Options / Referrer-Policy / Permissions-Policy. Hooks middleware doesn't set them either. |
-| AWS WAF | 🔴 | Documented as deferred (`operator-checklist.md:196`, `deploy.md:232`). Reviewer is right that this should land before public launch — see backlog. |
-| Least-privilege IAM for OIDC | ✓ | `iam-deploy-role.md` scopes the trust policy `sub` to `repo:Cservin69/ABERP-site:*` (with tightening note) and grants only S3 sync, CloudFront invalidate, SSM SendCommand on a specific instance ARN. No `*` resources. |
-| CloudFront access logging to a protected bucket | 🟡 | Mentioned as "optional. If on, 30-day lifecycle on the log bucket" (`cloudfront-behaviors.md:107`). Not enabled by default. Reviewer's argument for "enable it" is valid. |
-| Envelope encryption | 🔴 | Phase 3 (see Finding 1). |
-| `npm audit` / Dependabot | 🔴 | The CI runs `check`, `lint`, `test:unit`, `build` — no `npm audit`. `bin/lightsail-deploy.sh:59` runs `npm ci --omit=dev --no-audit --no-fund` (audit explicitly off). No `dependabot.yml`. |
+| Sub-control                                     | Status | Evidence                                                                                                                                                                                                                                  |
+| ----------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Security response headers via CloudFront        | 🔴     | `docs/aws/cloudfront-behaviors.md` does not mention a CloudFront Response Headers Policy. Nothing in the code or docs adds CSP / X-Content-Type-Options / Referrer-Policy / Permissions-Policy. Hooks middleware doesn't set them either. |
+| AWS WAF                                         | 🔴     | Documented as deferred (`operator-checklist.md:196`, `deploy.md:232`). Reviewer is right that this should land before public launch — see backlog.                                                                                        |
+| Least-privilege IAM for OIDC                    | ✓      | `iam-deploy-role.md` scopes the trust policy `sub` to `repo:Cservin69/ABERP-site:*` (with tightening note) and grants only S3 sync, CloudFront invalidate, SSM SendCommand on a specific instance ARN. No `*` resources.                  |
+| CloudFront access logging to a protected bucket | 🟡     | Mentioned as "optional. If on, 30-day lifecycle on the log bucket" (`cloudfront-behaviors.md:107`). Not enabled by default. Reviewer's argument for "enable it" is valid.                                                                 |
+| Envelope encryption                             | 🔴     | Phase 3 (see Finding 1).                                                                                                                                                                                                                  |
+| `npm audit` / Dependabot                        | 🔴     | The CI runs `check`, `lint`, `test:unit`, `build` — no `npm audit`. `bin/lightsail-deploy.sh:59` runs `npm ci --omit=dev --no-audit --no-fund` (audit explicitly off). No `dependabot.yml`.                                               |
 
 ### Finding 5 — Client-side & WebGL, Low-Medium
 
@@ -145,7 +145,7 @@ shader source.** The reviewer's "treat user input as untrusted" line is
 generic-LLM boilerplate that doesn't apply here.
 
 The legitimate sub-recommendation that **does** apply: bad-actor visitors with
-WebGL-hostile devices could cause GPU/CPU resource consumption on their *own*
+WebGL-hostile devices could cause GPU/CPU resource consumption on their _own_
 machine — which is annoying for them, not a server-side threat. The
 client-side disabled-fallback (`RainCanvas.svelte` checks `browser`) is fine.
 
@@ -158,13 +158,13 @@ XSS in the marketing pages — that lands in Finding 4 above, not here.
 
 **Verdict: 🔴 NOT YET ADDRESSED.**
 
-| Sub-control | Status | Evidence |
-| --- | --- | --- |
-| `npm audit` in CI | 🔴 | Not in `deploy.yml`. |
-| Dependabot config | 🔴 | No `.github/dependabot.yml`. |
-| TypeScript + lint in CI | ✓ | `deploy.yml:40–42`. |
-| `SECURITY.md` | 🔴 | Not present. Easy add; tells researchers where to report. |
-| Pin / lockfile review | ✓ | `package-lock.json` is committed; `npm ci` enforces it. |
+| Sub-control             | Status | Evidence                                                  |
+| ----------------------- | ------ | --------------------------------------------------------- |
+| `npm audit` in CI       | 🔴     | Not in `deploy.yml`.                                      |
+| Dependabot config       | 🔴     | No `.github/dependabot.yml`.                              |
+| TypeScript + lint in CI | ✓      | `deploy.yml:40–42`.                                       |
+| `SECURITY.md`           | 🔴     | Not present. Easy add; tells researchers where to report. |
+| Pin / lockfile review   | ✓      | `package-lock.json` is committed; `npm ci` enforces it.   |
 
 ### Finding 7 — Privacy & GDPR, Important
 
@@ -201,7 +201,7 @@ action.
 - **Browser CSRF path is closed** by SvelteKit's `csrf.checkOrigin` (default
   `true`) — cross-origin form POSTs are blocked.
 - **Direct attack path is open:** `curl -X POST -H 'Origin: https://friboard.com'
-  https://friboard.com/admin/quotes/<known-uuid>?/status -d 'status=rejected'`
+https://friboard.com/admin/quotes/<known-uuid>?/status -d 'status=rejected'`
   succeeds. The attacker needs a UUID; UUID v4 is 128-bit random and not
   enumerable, but UUIDs leak (email, error pages, browser history).
 
@@ -273,7 +273,7 @@ upload step. Defer.
 ### #8 (already-confirmed-safe) — Findings I verified are NOT real
 
 - **Existence oracle on `/api/quotes/[id]`** — false alarm. `requireAdminAuth`
-  throws 401 *before* the UUID-format check, so unauthed probes get 401
+  throws 401 _before_ the UUID-format check, so unauthed probes get 401
   regardless of whether the UUID exists. Confirmed at
   `src/routes/api/quotes/[id]/+server.ts:9–13`.
 - **`/healthz` info leak** — false alarm. Body is `"ok\n"` only; no
@@ -290,42 +290,42 @@ upload step. Defer.
 
 ### 🟥 Block AWS deploy — must do before pushing to friboard.com
 
-| # | Action | Threat | Effort | Scope |
-| --- | --- | --- | --- | --- |
-| 1 | Add `BODY_SIZE_LIMIT=52428800` to `/etc/aberp-site.env` template + bootstrap script + operator-checklist. | App rejects every 50 MB upload with 413. | S | Code (`bin/lightsail-bootstrap.sh`) + docs. |
-| 2 | Auth-guard every `+page.server.ts` action under `/admin/*`. Add a `requireAdminFromAction(cookies)` helper that uses `hasValidAdminCookie` and throws `error(401, …)` if not authed. Call it at the top of `status` action and `logout` action (and any future ones). | Direct-POST mutation of any quote by anyone who learns the UUID. | S | Code (`auth.ts`, `admin/quotes/[id]/+page.server.ts`, `admin/logout/+page.server.ts`). |
-| 3 | Tighten the OIDC trust-policy `sub` condition from `repo:Cservin69/ABERP-site:*` to `repo:Cservin69/ABERP-site:ref:refs/heads/main` + `…:environment:production`. The wildcard form means *any* PR branch in the repo can assume the deploy role. | A malicious PR (or compromised dev) could push to `main`-not-yet, run the deploy. | S | AWS-side IAM only; `iam-deploy-role.md` already documents the tighter form. |
+| #   | Action                                                                                                                                                                                                                                                                | Threat                                                                            | Effort | Scope                                                                                  |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | ------ | -------------------------------------------------------------------------------------- |
+| 1   | Add `BODY_SIZE_LIMIT=52428800` to `/etc/aberp-site.env` template + bootstrap script + operator-checklist.                                                                                                                                                             | App rejects every 50 MB upload with 413.                                          | S      | Code (`bin/lightsail-bootstrap.sh`) + docs.                                            |
+| 2   | Auth-guard every `+page.server.ts` action under `/admin/*`. Add a `requireAdminFromAction(cookies)` helper that uses `hasValidAdminCookie` and throws `error(401, …)` if not authed. Call it at the top of `status` action and `logout` action (and any future ones). | Direct-POST mutation of any quote by anyone who learns the UUID.                  | S      | Code (`auth.ts`, `admin/quotes/[id]/+page.server.ts`, `admin/logout/+page.server.ts`). |
+| 3   | Tighten the OIDC trust-policy `sub` condition from `repo:Cservin69/ABERP-site:*` to `repo:Cservin69/ABERP-site:ref:refs/heads/main` + `…:environment:production`. The wildcard form means _any_ PR branch in the repo can assume the deploy role.                     | A malicious PR (or compromised dev) could push to `main`-not-yet, run the deploy. | S      | AWS-side IAM only; `iam-deploy-role.md` already documents the tighter form.            |
 
 ### 🟧 Must do before first real customer traffic
 
-| # | Action | Threat | Effort | Scope |
-| --- | --- | --- | --- | --- |
-| 4 | Configure a CloudFront Response Headers Policy with: `Strict-Transport-Security` (max-age 1y, includeSubDomains, preload), `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, and a starting `Content-Security-Policy` (`default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'`). Attach to all behaviors. | XSS containment, click-jacking, MIME sniffing, referrer leak. | M | AWS-side CloudFront only. |
-| 5 | Add AWS WAF rate-based rule on `POST /api/quote` (e.g. 30 req per 5-min per IP). | Disk-full DoS (#4 in missed findings), automated scraping. | M | AWS-side WAF, plus `operator-checklist.md` step. |
-| 6 | Add `npm audit --audit-level=high` step to `.github/workflows/deploy.yml` (before `npm run build`). Add `.github/dependabot.yml` for weekly bumps. | Known-CVE in transitive dep. | S | Code (CI). |
-| 7 | Enable CloudFront standard logging to a separate bucket; bucket-policy-restrict to the CloudFront log-delivery principal; 30-day lifecycle to expire. Mention in `docs/privacy.md` if the retention exceeds what's currently documented. | Forensics if attacked; standard compliance baseline. | S | AWS-side CloudFront + S3. |
-| 8 | Document admin token rotation procedure (env-var swap + systemd restart + ABERP-side polling-config update). Already half-described in `deploy.md:360`; promote it to its own runbook so it's not buried in the deploy doc. | Token compromise response is currently ad-hoc. | S | Docs. |
-| 9 | Add a honeypot field (hidden CSS, name `website` or similar) to `/quote` form; reject submission server-side if filled. | Trivial bot deterrence. | S | Code. |
-| 10 | Set a concrete retention period in `docs/privacy.md` and replace the "operator-determined, pending finalisation" line. Suggested: 24 months from last `status_history` entry, with manual erasure on SAR. | GDPR Art. 5(1)(e) storage-limitation principle requires a defined period. | S | Docs + Ervin decision. |
+| #   | Action                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Threat                                                                    | Effort | Scope                                            |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- | ------ | ------------------------------------------------ |
+| 4   | Configure a CloudFront Response Headers Policy with: `Strict-Transport-Security` (max-age 1y, includeSubDomains, preload), `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, and a starting `Content-Security-Policy` (`default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'`). Attach to all behaviors. | XSS containment, click-jacking, MIME sniffing, referrer leak.             | M      | AWS-side CloudFront only.                        |
+| 5   | Add AWS WAF rate-based rule on `POST /api/quote` (e.g. 30 req per 5-min per IP).                                                                                                                                                                                                                                                                                                                                                                                                                                    | Disk-full DoS (#4 in missed findings), automated scraping.                | M      | AWS-side WAF, plus `operator-checklist.md` step. |
+| 6   | Add `npm audit --audit-level=high` step to `.github/workflows/deploy.yml` (before `npm run build`). Add `.github/dependabot.yml` for weekly bumps.                                                                                                                                                                                                                                                                                                                                                                  | Known-CVE in transitive dep.                                              | S      | Code (CI).                                       |
+| 7   | Enable CloudFront standard logging to a separate bucket; bucket-policy-restrict to the CloudFront log-delivery principal; 30-day lifecycle to expire. Mention in `docs/privacy.md` if the retention exceeds what's currently documented.                                                                                                                                                                                                                                                                            | Forensics if attacked; standard compliance baseline.                      | S      | AWS-side CloudFront + S3.                        |
+| 8   | Document admin token rotation procedure (env-var swap + systemd restart + ABERP-side polling-config update). Already half-described in `deploy.md:360`; promote it to its own runbook so it's not buried in the deploy doc.                                                                                                                                                                                                                                                                                         | Token compromise response is currently ad-hoc.                            | S      | Docs.                                            |
+| 9   | Add a honeypot field (hidden CSS, name `website` or similar) to `/quote` form; reject submission server-side if filled.                                                                                                                                                                                                                                                                                                                                                                                             | Trivial bot deterrence.                                                   | S      | Code.                                            |
+| 10  | Set a concrete retention period in `docs/privacy.md` and replace the "operator-determined, pending finalisation" line. Suggested: 24 months from last `status_history` entry, with manual erasure on SAR.                                                                                                                                                                                                                                                                                                           | GDPR Art. 5(1)(e) storage-limitation principle requires a defined period. | S      | Docs + Ervin decision.                           |
 
 ### 🟨 First month post-launch
 
-| # | Action | Threat | Effort | Scope |
-| --- | --- | --- | --- | --- |
-| 11 | Magic-byte sniff on uploaded CAD files (cheap allowlist for ISO/STEP, STL ASCII/binary, DXF prefix). Reject mismatched ext+magic. | Disguised payloads; doesn't actually execute but hardens against future automation. | M | Code (`/api/quote`). |
-| 12 | Replace cookie-value-is-the-secret with an opaque session-id pattern. Store sessions in `data/sessions/<id>.json` (single-operator: a single file is fine). Cookie holds the random id only. | Cookie theft = secret theft. Forward-compat for multi-operator. | M | Code (`auth.ts`). |
-| 13 | Append-only `audit.jsonl` per quote (in addition to in-place `status_history`). One line per state transition. | Tamper-evident audit trail. | M | Code (`quote-store.ts`). |
-| 14 | `SECURITY.md` at repo root with a `hello@friboard.com` contact and disclosure-window expectations. | Responsible-disclosure on-ramp. | S | Docs. |
-| 15 | Wire CloudWatch Logs ingestion for `/home/aberp/logs/aberp-site.{log,err}`; redact `email` / `filename` fields before they're shipped; document the new processor in `docs/privacy.md`. | Operational visibility without leaking PII to a US-region log bucket. | M | Lightsail-side (CloudWatch agent) + docs. |
-| 16 | Add `BODY_SIZE_LIMIT`/`SHUTDOWN_TIMEOUT`/`IDLE_TIMEOUT` tuning to the env template with reasoning comments. (Currently they all run on adapter-node defaults.) | Slow-loris-style upload starvation, hung connections. | S | Docs. |
+| #   | Action                                                                                                                                                                                       | Threat                                                                              | Effort | Scope                                     |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ------ | ----------------------------------------- |
+| 11  | Magic-byte sniff on uploaded CAD files (cheap allowlist for ISO/STEP, STL ASCII/binary, DXF prefix). Reject mismatched ext+magic.                                                            | Disguised payloads; doesn't actually execute but hardens against future automation. | M      | Code (`/api/quote`).                      |
+| 12  | Replace cookie-value-is-the-secret with an opaque session-id pattern. Store sessions in `data/sessions/<id>.json` (single-operator: a single file is fine). Cookie holds the random id only. | Cookie theft = secret theft. Forward-compat for multi-operator.                     | M      | Code (`auth.ts`).                         |
+| 13  | Append-only `audit.jsonl` per quote (in addition to in-place `status_history`). One line per state transition.                                                                               | Tamper-evident audit trail.                                                         | M      | Code (`quote-store.ts`).                  |
+| 14  | `SECURITY.md` at repo root with a `hello@friboard.com` contact and disclosure-window expectations.                                                                                           | Responsible-disclosure on-ramp.                                                     | S      | Docs.                                     |
+| 15  | Wire CloudWatch Logs ingestion for `/home/aberp/logs/aberp-site.{log,err}`; redact `email` / `filename` fields before they're shipped; document the new processor in `docs/privacy.md`.      | Operational visibility without leaking PII to a US-region log bucket.               | M      | Lightsail-side (CloudWatch agent) + docs. |
+| 16  | Add `BODY_SIZE_LIMIT`/`SHUTDOWN_TIMEOUT`/`IDLE_TIMEOUT` tuning to the env template with reasoning comments. (Currently they all run on adapter-node defaults.)                               | Slow-loris-style upload starvation, hung connections.                               | S      | Docs.                                     |
 
 ### 🟦 Polish / monitor
 
-| # | Action | Threat | Effort | Scope |
-| --- | --- | --- | --- | --- |
-| 17 | Build-artifact SHA-256 verification on the Lightsail deploy side (SSM Parameter Store carries the digest). | Defense-in-depth on the S3 staging bucket. | M | Code (`lightsail-deploy.sh`) + workflow. |
-| 18 | Automated retention sweeper: nightly cron that moves `data/quotes/<id>` to a `data/archived/` bucket after N months, deletes after N+M. | Storage-minimisation principle. | M | Code (cron + script) + docs. |
-| 19 | Per-quote envelope encryption at rest (KMS data key, encrypted JSON blob, decrypted only when the operator opens the detail view). | CAD-as-IP at-rest exposure if the box is seized / disk leaks. | L | Code + AWS-side KMS. |
+| #   | Action                                                                                                                                  | Threat                                                        | Effort | Scope                                    |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | ------ | ---------------------------------------- |
+| 17  | Build-artifact SHA-256 verification on the Lightsail deploy side (SSM Parameter Store carries the digest).                              | Defense-in-depth on the S3 staging bucket.                    | M      | Code (`lightsail-deploy.sh`) + workflow. |
+| 18  | Automated retention sweeper: nightly cron that moves `data/quotes/<id>` to a `data/archived/` bucket after N months, deletes after N+M. | Storage-minimisation principle.                               | M      | Code (cron + script) + docs.             |
+| 19  | Per-quote envelope encryption at rest (KMS data key, encrypted JSON blob, decrypted only when the operator opens the detail view).      | CAD-as-IP at-rest exposure if the box is seized / disk leaks. | L      | Code + AWS-side KMS.                     |
 
 ---
 
@@ -340,7 +340,7 @@ upload step. Defer.
   CAD-processing service is added (Phase 5+).
 - **Customer accounts auth before Phase 2 launch.** There are no customer
   accounts. The reviewer's full session-auth recommendation is correct
-  *conceptually* but doesn't apply to today's surface. Bearer-token admin is
+  _conceptually_ but doesn't apply to today's surface. Bearer-token admin is
   defensible for a single-operator lead-gen funnel.
 - **"SvelteKit form actions" framing of the public quote form.** The form
   uses `fetch()` to the `/api/quote` endpoint, which is functionally

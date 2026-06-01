@@ -3,6 +3,8 @@ import { timingSafeEqual } from 'node:crypto';
 import type { Handle } from '@sveltejs/kit';
 
 const SECRET_HEADER = 'x-cloudfront-secret';
+const EXPECTED_BODY_SIZE_LIMIT = 52_428_800;
+let bodyLimitChecked = false;
 
 function safeEqual(a: string, b: string): boolean {
 	const ab = Buffer.from(a, 'utf8');
@@ -28,7 +30,22 @@ function safeEqual(a: string, b: string): boolean {
  * When CLOUDFRONT_SHARED_SECRET is unset (local dev, tests), the check is
  * skipped entirely.
  */
+function checkBodySizeLimitOnce(): void {
+	if (bodyLimitChecked) return;
+	bodyLimitChecked = true;
+	const raw = process.env.BODY_SIZE_LIMIT;
+	const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+	if (!Number.isFinite(parsed) || parsed < EXPECTED_BODY_SIZE_LIMIT) {
+		console.warn(
+			`[aberp-site] BODY_SIZE_LIMIT=${raw ?? '(unset, adapter-node default 524288)'} ` +
+				`< ${EXPECTED_BODY_SIZE_LIMIT}. CAD uploads larger than this will 413 ` +
+				`before the /api/quote handler runs. Set BODY_SIZE_LIMIT=52428800.`
+		);
+	}
+}
+
 export const handle: Handle = async ({ event, resolve }) => {
+	checkBodySizeLimitOnce();
 	if (event.url.pathname === '/healthz') {
 		return new Response('ok\n', {
 			status: 200,

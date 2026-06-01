@@ -167,6 +167,9 @@ HOST=127.0.0.1
 PORT=3000
 ORIGIN=https://friboard.com
 ABERP_SITE_QUOTE_DIR=/home/aberp/data/quotes
+# Cap matching the in-handler MAX_TOTAL_BYTES in src/routes/api/quote/+server.ts.
+# adapter-node defaults to 512 KB which silently 413s every CAD upload.
+BODY_SIZE_LIMIT=52428800
 EOF
   sudo chmod 600 /etc/aberp-site.env
   sudo chown aberp:aberp /etc/aberp-site.env

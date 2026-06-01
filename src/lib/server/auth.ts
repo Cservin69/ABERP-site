@@ -48,6 +48,12 @@ export function hasValidAdminCookie(cookies: Cookies): boolean {
 /**
  * Used by /admin/* layout server loads. Redirects to /admin/login if no valid cookie.
  * Throws 503 if env unset.
+ *
+ * IMPORTANT: SvelteKit runs `+page.server.ts` actions **before** any parent
+ * layout's server `load`. This helper therefore does NOT protect form actions —
+ * the layout guard has not run yet at action time. Every `actions = { … }`
+ * export under /admin/* (excluding login) MUST call
+ * `requireAdminCookieOrError(cookies)` at the top of the handler instead.
  */
 export function requireAdminCookieOrRedirect(cookies: Cookies, currentPath: string): void {
 	if (!hasValidAdminCookie(cookies)) {
@@ -56,6 +62,21 @@ export function requireAdminCookieOrRedirect(cookies: Cookies, currentPath: stri
 				? `?next=${encodeURIComponent(currentPath)}`
 				: '';
 		throw redirect(303, `/admin/login${target}`);
+	}
+}
+
+/**
+ * Form-action variant of `requireAdminCookieOrRedirect`. Throws `error(401)`
+ * instead of redirecting. Use this at the top of every `+page.server.ts`
+ * `actions = { … }` handler under /admin/* (excluding the login action
+ * itself, which establishes the cookie, and logout, which is idempotent).
+ * Redirecting from a form action would 303 the request back to /admin/login
+ * with no signal in the response body, so direct-POST attackers get the
+ * misleading appearance of success; the 401 makes the failure explicit.
+ */
+export function requireAdminCookieOrError(cookies: Cookies): void {
+	if (!hasValidAdminCookie(cookies)) {
+		throw error(401, 'Unauthorized');
 	}
 }
 

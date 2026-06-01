@@ -56,7 +56,13 @@ jobs:
 
   deploy-static:
     needs: build
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    # The IAM trust policy sub is pinned to `…:environment:production`, so the
+    # OIDC-issued role assumption only succeeds when the job runs under this
+    # environment. Required-reviewer protection on the environment also forces
+    # human approval before AWS credentials are minted.
+    environment: production
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -104,7 +110,9 @@ jobs:
 
   deploy-dynamic:
     needs: build
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4

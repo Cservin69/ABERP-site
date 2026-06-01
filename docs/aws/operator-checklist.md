@@ -43,6 +43,19 @@ git push -u origin main
       `BUCKET_STATIC`, `DISTRIBUTION_ID`, `INSTANCE_ID`. `INSTANCE_ID` you
       don't have yet — leave it as a placeholder; come back and tighten
       after Step 6.
+- [ ] The trust policy uses `StringEquals` on the `sub` claim with two values:
+      `refs/heads/main` (covers the `build` job) and `environment:production`
+      (covers the `deploy-static` / `deploy-dynamic` jobs). This is mandatory
+      — a wildcard sub would let any PR branch assume the deploy role.
+- [ ] Create the GitHub environment **now** (otherwise the deploy jobs will be
+      stuck waiting on a non-existent environment):
+      `Cservin69/ABERP-site` → Settings → Environments → New environment
+      `production`. Under **Required reviewers** add `ervin@aben.ch`
+      (Ervin Cservinszky). Optionally restrict deployment branches to
+      `main` only. The `deploy.yml` workflow declares
+      `environment: production` on the AWS-touching jobs; with required
+      reviewers set, every deploy pauses for Ervin's explicit approval before
+      AWS credentials are issued.
 - [ ] Copy the role ARN.
 
 ---
@@ -96,8 +109,14 @@ sudo SSM_ACTIVATION_CODE=<code> \
 
 - [ ] Generate the admin token: `sudo openssl rand -hex 32` — copy the output.
 - [ ] Generate the CloudFront shared secret: `sudo openssl rand -hex 32`.
-- [ ] Edit `/etc/aberp-site.env` (`sudo $EDITOR …`) and fill: - `ABERP_SITE_ADMIN_TOKEN=<admin token>` - `CLOUDFRONT_SHARED_SECRET=<cloudfront secret>` - Leave `HOST`, `PORT`, `ORIGIN`, `ABERP_SITE_QUOTE_DIR`, `NODE_ENV`
-      at their defaults unless you have a reason to change.
+- [ ] Edit `/etc/aberp-site.env` (`sudo $EDITOR …`) and fill: - `ABERP_SITE_ADMIN_TOKEN=<admin token>` - `CLOUDFRONT_SHARED_SECRET=<cloudfront secret>` - Leave `HOST`, `PORT`, `ORIGIN`, `ABERP_SITE_QUOTE_DIR`, `NODE_ENV`,
+      `BODY_SIZE_LIMIT` at their defaults unless you have a reason to change.
+      The bootstrap script pins `BODY_SIZE_LIMIT=52428800` (50 MB) — without
+      it, adapter-node silently 413s every CAD upload at 512 KB. The
+      `aberp-site.service` unit also sets it via `Environment=` as a
+      belt-and-suspenders default. After first start, run
+      `sudo journalctl -u aberp-site | grep BODY_SIZE_LIMIT` — if you see a
+      warning line, the cap is misconfigured.
 - [ ] Save both secrets in your password manager. The admin token also goes
       into ABERP's Quote Intake config when you wire that up (S210); the
       CloudFront secret goes into the CloudFront origin config (Step 8).
@@ -150,14 +169,21 @@ If you bind Node directly to `0.0.0.0:3000`:
 
 ## Step 10 — Enable push-to-deploy
 
-Until you're comfortable, the workflow trigger on `push: branches: [main]` is
-fine but feels scary. Two ways to make it safer:
+The `production` GitHub environment with required reviewer is now created in
+Step 3 and wired into `deploy.yml`. Every push to `main` triggers the workflow,
+the `build` job runs unattended, then `deploy-static` and `deploy-dynamic`
+pause at the environment-protection gate until Ervin approves them.
 
-- [ ] Add a `production` GitHub environment with required reviewers, then
-      tighten the IAM trust policy `sub` condition to
-      `repo:Cservin69/ABERP-site:environment:production`. Now every push to
-      main waits for human approval before AWS credentials are issued.
-- [ ] Or comment out the `push:` block and run from `workflow_dispatch` only.
+- [ ] Verify the gate works: push a trivial change to `main`, watch GitHub
+      Actions, confirm the deploy jobs sit in the "Waiting for approval"
+      state. Approve once you're ready; AWS credentials are minted only after
+      the approval click.
+- [ ] If at any point you want to dispatch a deploy without the approval
+      pause (e.g. you're at the keyboard and just want it to ship), the
+      required-reviewer setting is reachable in repo Settings → Environments
+      → production. **Do not** widen the IAM trust-policy `sub` to a wildcard
+      to bypass the gate; the wildcard form is the vulnerability this step
+      closes.
 
 ---
 

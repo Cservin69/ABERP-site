@@ -1,6 +1,7 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { stat } from 'node:fs/promises';
 import type { Actions, PageServerLoad } from './$types';
+import { requireAdminCookieOrError } from '$lib/server/auth';
 import { quoteFilePath, readQuote, writeQuoteAtomic } from '$lib/server/quote-store';
 import { QUOTE_STATUSES, isQuoteStatus } from '$lib/server/quote-status';
 
@@ -44,7 +45,8 @@ export const load: PageServerLoad = async ({ params }) => {
 };
 
 export const actions: Actions = {
-	status: async ({ params, request }) => {
+	status: async ({ params, request, cookies }) => {
+		requireAdminCookieOrError(cookies);
 		const id = params.id ?? '';
 		if (!UUID_RE.test(id)) return fail(400, { error: 'Invalid id.' });
 

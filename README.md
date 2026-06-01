@@ -16,10 +16,20 @@ See `../ABERP/docs/e2e-shop/ground-zero.md` (in the ABERP repo) for the authorit
 
 ```sh
 npm install
-npm run dev      # http://localhost:5173
-npm run check    # svelte-check (type-check)
-npm run build    # static build/ for S3+CloudFront
+cp .env.example .env   # provides BODY_SIZE_LIMIT, dev admin token, etc.
+npm run dev            # http://localhost:5173
+npm run check          # svelte-check (type-check)
+npm run build          # adapter-node output in build/
 npm run test:unit -- --run
+```
+
+`.env.example` pins `BODY_SIZE_LIMIT=52428800` (50 MB). Without it, adapter-node
+defaults to 512 KB and every CAD upload 413s before the handler runs. The
+canonical local-dev quote-form command is:
+
+```sh
+BODY_SIZE_LIMIT=52428800 ABERP_SITE_ADMIN_TOKEN=dev npm run build && \
+  BODY_SIZE_LIMIT=52428800 ABERP_SITE_ADMIN_TOKEN=dev node build/index.js
 ```
 
 ## Production target

@@ -16,6 +16,7 @@
 	let notes = $state('');
 	let consent = $state(false);
 	let files = $state<File[]>([]);
+	let honeypot = $state('');
 
 	let fileInput: HTMLInputElement | undefined = $state();
 	let submitting = $state(false);
@@ -72,6 +73,7 @@
 		if (deadline) body.append('deadline', deadline);
 		if (notes.trim()) body.append('notes', notes.trim());
 		body.append('consent', 'true');
+		if (honeypot) body.append('website', honeypot);
 		for (const f of files) body.append('files', f);
 
 		try {
@@ -127,6 +129,20 @@
 			</section>
 		{:else}
 			<form class="quote-form" onsubmit={onSubmit} novalidate>
+				<!-- Honeypot. Real users never see or focus this; bots that auto-fill
+				     every input populate it and the server silently 200-OKs without
+				     persisting anything. Server-validated in /api/quote. -->
+				<div class="honeypot" aria-hidden="true">
+					<label for="website">Website (leave blank)</label>
+					<input
+						id="website"
+						name="website"
+						type="text"
+						tabindex={-1}
+						autocomplete="off"
+						bind:value={honeypot}
+					/>
+				</div>
 				<div class="field">
 					<label for="name">Your name <span class="req" aria-hidden="true">*</span></label>
 					<input
@@ -514,6 +530,19 @@
 		border: 1px solid rgba(198, 106, 106, 0.5);
 		color: #e8a8a8;
 		font-size: 0.9rem;
+	}
+
+	/* Honeypot: off-canvas, transparent, untabbable. Hidden from real users
+	   and most assistive tech; only naive bots will fill it. */
+	.honeypot {
+		position: absolute;
+		left: -10000px;
+		top: auto;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		opacity: 0;
+		pointer-events: none;
 	}
 
 	.cta {
