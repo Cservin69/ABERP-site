@@ -1,0 +1,30 @@
+[Unit]
+Description=ABERP-site (Friboard) SvelteKit Node server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aberp
+Group=aberp
+WorkingDirectory=/home/aberp/current
+EnvironmentFile=/etc/aberp-site.env
+ExecStart=/usr/bin/node build
+Restart=on-failure
+RestartSec=5
+# Logs land in append-mode files; logrotate (configured by lightsail-bootstrap.sh)
+# rotates them daily, keeps 14 days, compressed.
+StandardOutput=append:/home/aberp/logs/aberp-site.log
+StandardError=append:/home/aberp/logs/aberp-site.err
+
+# Hardening — the Node process only needs to read its release dir and write to
+# /home/aberp/{logs,data}. The data symlink resolves to /mnt/aberp-data, which
+# must be explicitly granted in ReadWritePaths.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ReadWritePaths=/home/aberp/logs /home/aberp/data /mnt/aberp-data
+
+[Install]
+WantedBy=multi-user.target

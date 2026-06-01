@@ -1,0 +1,172 @@
+name: Deploy to AWS
+
+# Push to main → build, sync static surface to S3+CloudFront, ship server tarball to
+# Lightsail via SSM Run Command. Manual trigger via workflow_dispatch is available
+# for first deploys (preferred until the operator is comfortable with auto-deploy).
+#
+# All AWS calls authenticate via GitHub OIDC — no long-lived AWS access keys.
+# Required repo variables (Settings → Secrets and variables → Actions → Variables tab):
+#   AWS_DEPLOY_ROLE_ARN     arn:aws:iam::<account>:role/<deploy-role>
+#   ABERP_SITE_BUCKET       S3 bucket name (also used as deploy-staging bucket)
+#   ABERP_SITE_CF_DIST      CloudFront distribution ID
+#   ABERP_SITE_LS_INSTANCE  Lightsail instance ID registered with SSM (mi-... or i-...)
+# See docs/aws/operator-checklist.md for the full provisioning recipe.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-central-1
+  BUCKET_STATIC: ${{ vars.ABERP_SITE_BUCKET }}
+  CLOUDFRONT_DIST: ${{ vars.ABERP_SITE_CF_DIST }}
+  LIGHTSAIL_INSTANCE: ${{ vars.ABERP_SITE_LS_INSTANCE }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run check
+      - run: npm run lint
+      - run: npm run test:unit -- --run
+      - run: npm run build
+      - name: Sanity-check build output
+        run: |
+          set -euo pipefail
+          test -d build/server  || { echo "build/server missing"; exit 1; }
+          test -d build/client  || { echo "build/client missing"; exit 1; }
+          test -f build/index.js || { echo "build/index.js missing"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build
+          path: build/
+          retention-days: 7
+          include-hidden-files: false
+
+  deploy-static:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: build
+          path: build/
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Sync hashed immutable assets to S3
+        run: |
+          set -euo pipefail
+          # build/client/_app contains Vite-hashed bundles — safe to cache for a year.
+          aws s3 sync build/client/_app "s3://${BUCKET_STATIC}/_app" \
+            --delete \
+            --cache-control 'public, max-age=31536000, immutable'
+      - name: Sync static client assets (favicons, OG image, robots, etc.)
+        run: |
+          set -euo pipefail
+          # Everything in build/client except _app and prerendered HTML.
+          # Short cache (5 min) so favicon swaps appear quickly without manual invalidation.
+          aws s3 sync build/client "s3://${BUCKET_STATIC}" \
+            --exclude '_app/*' \
+            --exclude '*.html' \
+            --cache-control 'public, max-age=300'
+      - name: Sync prerendered HTML
+        run: |
+          set -euo pipefail
+          # Prerendered routes (/, /privacy, /imprint, /sitemap.xml) — no caching
+          # at S3 so CloudFront re-fetches on every visit; CloudFront edge cache
+          # is governed by its own cache policy (CachingDisabled for these paths).
+          if [ -d build/prerendered ]; then
+            aws s3 sync build/prerendered "s3://${BUCKET_STATIC}" \
+              --cache-control 'public, max-age=0, must-revalidate'
+          fi
+      - name: Invalidate CloudFront for prerendered + meta paths
+        run: |
+          set -euo pipefail
+          aws cloudfront create-invalidation \
+            --distribution-id "${CLOUDFRONT_DIST}" \
+            --paths '/' '/index.html' '/privacy' '/privacy.html' \
+                    '/imprint' '/imprint.html' \
+                    '/robots.txt' '/sitemap.xml' \
+            >/dev/null
+
+  deploy-dynamic:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: build
+          path: build/
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Package server release bundle
+        run: |
+          set -euo pipefail
+          # build/ is the adapter-node output (server + client + prerendered).
+          # package.json and package-lock.json are required for `npm ci --omit=dev`
+          # on the Lightsail side.
+          tar -czf build-server.tgz \
+            build package.json package-lock.json
+          ls -lh build-server.tgz
+      - name: Upload release bundle to S3 staging prefix
+        run: |
+          set -euo pipefail
+          aws s3 cp build-server.tgz \
+            "s3://${BUCKET_STATIC}/_deploy/build-server-${{ github.sha }}.tgz" \
+            --cache-control 'no-store' \
+            --metadata "commit=${{ github.sha }}"
+      - name: Dispatch deploy on Lightsail via SSM
+        run: |
+          set -euo pipefail
+          # SSM Run Command invokes bin/lightsail-deploy.sh on the instance.
+          # The script is shipped to the instance once during bootstrap and stays at
+          # /home/aberp/lightsail-deploy.sh thereafter. It pulls the SHA-tagged
+          # tarball from s3://$BUCKET_STATIC/_deploy/, atomically swaps the
+          # `current` symlink, restarts the service, and verifies /.
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "${LIGHTSAIL_INSTANCE}" \
+            --document-name AWS-RunShellScript \
+            --comment "ABERP-site deploy ${{ github.sha }}" \
+            --parameters "commands=[\"sudo -u aberp BUCKET_STATIC=${BUCKET_STATIC} AWS_REGION=${AWS_REGION} /home/aberp/lightsail-deploy.sh ${{ github.sha }}\"]" \
+            --query 'Command.CommandId' \
+            --output text)
+          echo "SSM command id: $CMD_ID"
+          # Wait for completion (poll, max ~5 min).
+          for i in $(seq 1 60); do
+            STATUS=$(aws ssm list-command-invocations \
+              --command-id "$CMD_ID" \
+              --details \
+              --query 'CommandInvocations[0].Status' \
+              --output text)
+            echo "[$i] status: $STATUS"
+            case "$STATUS" in
+              Success) exit 0 ;;
+              Cancelled|TimedOut|Failed) ;;
+              *) sleep 5; continue ;;
+            esac
+            echo "::error::SSM command finished with status $STATUS"
+            aws ssm list-command-invocations \
+              --command-id "$CMD_ID" \
+              --details \
+              --query 'CommandInvocations[0].CommandPlugins[0].Output' \
+              --output text
+            exit 1
+          done
+          echo "::error::Timed out waiting for SSM command $CMD_ID"
+          exit 1
