@@ -110,7 +110,10 @@ jobs:
 
   deploy-dynamic:
     needs: build
-    if: github.ref == 'refs/heads/main'
+    # Phase 5 (Lightsail/SSR) not yet provisioned; skip when ABERP_SITE_LS_INSTANCE
+    # is unset so Phase 1 (static-only) pushes go green. Remove this `vars.…` clause
+    # once the Lightsail instance is registered in SSM and the variable is filled.
+    if: github.ref == 'refs/heads/main' && vars.ABERP_SITE_LS_INSTANCE != ''
     runs-on: ubuntu-latest
     environment: production
     steps:
