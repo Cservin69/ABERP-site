@@ -1,6 +1,7 @@
 // @ts-nocheck
 // Vendored & adapted from https://github.com/codrops/RainEffect — see LICENSE.
-// Adaptations: shader strings passed in (no glslify), exposed destroy() for SPA cleanup.
+// Adaptations: shader strings passed in (no glslify), exposed destroy()+resize()
+// for SPA cleanup, explicit gl.viewport() so the drawingbuffer fills the canvas.
 
 import GL from './gl-obj.js';
 import { createCanvas } from './util.js';
@@ -60,6 +61,7 @@ RainRenderer.prototype = {
 		const gl = this.gl;
 		this.programWater = gl.program;
 
+		gl.gl.viewport(0, 0, this.width, this.height);
 		gl.createUniform('2f', 'resolution', this.width, this.height);
 		gl.createUniform('1f', 'textureRatio', this.imageBg.width / this.imageBg.height);
 		gl.createUniform('1i', 'renderShine', this.imageShine == null ? false : true);
@@ -95,6 +97,13 @@ RainRenderer.prototype = {
 		this._stopped = true;
 		if (this.rafId != null) cancelAnimationFrame(this.rafId);
 		this.rafId = null;
+	},
+	resize(w, h) {
+		this.width = w;
+		this.height = h;
+		this.gl.gl.viewport(0, 0, w, h);
+		this.gl.useProgram(this.programWater);
+		this.gl.createUniform('2f', 'resolution', w, h);
 	},
 	draw() {
 		if (this._stopped) return;

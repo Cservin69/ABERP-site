@@ -1,5 +1,5 @@
 // Wrapper around the vendored codrops RainEffect (see ./LICENSE).
-// Exposes a clean init/destroy API for a single canvas; bundles textures + shaders.
+// Exposes a clean init/destroy/resize API for a single canvas; bundles textures + shaders.
 
 // Vite handles these import forms: ?url for asset URL, ?raw for inline string.
 import dropAlphaUrl from './assets/drop-alpha.png';
@@ -12,6 +12,7 @@ import fragShader from './shaders/water.frag?raw';
 import Raindrops from './raindrops.js';
 import RainRenderer from './rain-renderer.js';
 import { loadImages } from './util.js';
+import { getContext } from './webgl.js';
 
 export interface RainOptions {
 	maxDpr?: number;
@@ -19,6 +20,7 @@ export interface RainOptions {
 
 export interface RainInstance {
 	destroy(): void;
+	resize(): void;
 }
 
 const textureFgSize = { width: 96, height: 64 };
@@ -31,18 +33,36 @@ function makeCanvas(w: number, h: number): HTMLCanvasElement {
 	return c;
 }
 
+function measure(
+	canvas: HTMLCanvasElement,
+	maxDpr: number
+): { width: number; height: number; dpi: number } {
+	const dpi = Math.min(window.devicePixelRatio || 1, maxDpr);
+	const width = canvas.clientWidth || window.innerWidth;
+	const height = canvas.clientHeight || window.innerHeight;
+	return { width, height, dpi };
+}
+
 export async function initRain(
 	canvas: HTMLCanvasElement,
 	options: RainOptions = {}
 ): Promise<RainInstance> {
 	const maxDpr = options.maxDpr ?? 2;
-	const dpi = Math.min(window.devicePixelRatio || 1, maxDpr);
+	const { width, height, dpi } = measure(canvas, maxDpr);
 
-	const width = canvas.clientWidth || window.innerWidth;
-	const height = canvas.clientHeight || window.innerHeight;
-
+	// Set the drawingbuffer BEFORE we touch getContext. WebGL's viewport is
+	// initialized from drawingBufferWidth/Height at context-creation time and
+	// is NOT auto-updated when the canvas is resized later — so getting the
+	// dimensions right before the first getContext() call is load-bearing.
 	canvas.width = Math.max(1, Math.floor(width * dpi));
 	canvas.height = Math.max(1, Math.floor(height * dpi));
+
+	// Probe WebGL here (not in the Svelte component) so the viewport lines up
+	// with the just-resized drawingbuffer; throw to trigger the gradient fallback.
+	const probe = getContext(canvas, { alpha: false });
+	if (!probe) {
+		throw new Error('webgl: no context available');
+	}
 
 	const images = (await loadImages({
 		dropAlpha: dropAlphaUrl,
@@ -91,6 +111,17 @@ export async function initRain(
 		destroy() {
 			raindrops.destroy();
 			renderer.destroy();
+		},
+		resize() {
+			// Resize the drawingbuffer to match the new layout, then re-pin the
+			// GL viewport — see comment on the load-bearing first assignment above.
+			const next = measure(canvas, maxDpr);
+			const w = Math.max(1, Math.floor(next.width * next.dpi));
+			const h = Math.max(1, Math.floor(next.height * next.dpi));
+			if (w === canvas.width && h === canvas.height) return;
+			canvas.width = w;
+			canvas.height = h;
+			renderer.resize(w, h);
 		}
 	};
 }

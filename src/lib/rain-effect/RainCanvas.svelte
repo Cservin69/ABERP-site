@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { browser } from '$app/environment';
 	import type { RainInstance } from './rain.ts';
+	import { decideRainFallback } from './fallback.ts';
 
 	let canvas: HTMLCanvasElement;
 	let rain: RainInstance | null = null;
@@ -10,24 +11,25 @@
 	onMount(() => {
 		if (!browser) return;
 
-		const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-		const saveData =
-			(navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData ===
-			true;
-		const tinyViewport = window.innerWidth < 480;
+		const decision = decideRainFallback({
+			reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+			saveData:
+				(navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData ===
+				true,
+			innerWidth: window.innerWidth
+		});
 
-		if (reducedMotion || saveData || tinyViewport) {
+		if (decision.fallback) {
 			fallback = true;
-			return;
-		}
-
-		const probe = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-		if (!probe) {
-			fallback = true;
+			console.info(`[RainCanvas] fallback: ${decision.reason}`);
 			return;
 		}
 
 		let cancelled = false;
+		// Note: WebGL probe used to happen here, but it created the GL context
+		// while the canvas was still at its default 300×150 — that became the
+		// permanent viewport, so rain only rendered in a top-left patch. The
+		// probe now lives inside initRain(), after the drawingbuffer is sized.
 		import('./rain.ts')
 			.then(({ initRain }) => initRain(canvas))
 			.then((instance) => {
@@ -36,14 +38,21 @@
 					return;
 				}
 				rain = instance;
+				console.info('[RainCanvas] initialized');
 			})
 			.catch((err) => {
-				console.error('[RainCanvas] init failed', err);
+				console.error('[RainCanvas] init failed — falling back to gradient', err);
 				fallback = true;
 			});
 
+		const onResize = () => {
+			if (rain) rain.resize();
+		};
+		window.addEventListener('resize', onResize, { passive: true });
+
 		return () => {
 			cancelled = true;
+			window.removeEventListener('resize', onResize);
 			if (rain) rain.destroy();
 			rain = null;
 		};
