@@ -56,9 +56,17 @@
 			'Segoe UI',
 			Roboto,
 			sans-serif;
-		font-weight: 200;
+		/* Thickened ~3x vs the original ExtraLight (200): black weight + an
+		   outward stroke in the same gold gradient widens each stem so the
+		   mark reads heavy against the rain canvas. paint-order keeps the
+		   stroke under the fill so the gold stays crisp. */
+		font-weight: 900;
 		font-size: 92px;
 		letter-spacing: 18px;
+		stroke: url(#abenerp-gold);
+		stroke-width: 6px;
+		stroke-linejoin: round;
+		paint-order: stroke fill;
 	}
 
 	.monogram {
@@ -68,9 +76,14 @@
 			'Segoe UI',
 			Roboto,
 			sans-serif;
-		font-weight: 300;
+		/* Bumped to match the heavier lettering so the accent stays balanced. */
+		font-weight: 800;
 		font-size: 42px;
 		letter-spacing: 6px;
+		stroke: url(#abenerp-gold);
+		stroke-width: 2.5px;
+		stroke-linejoin: round;
+		paint-order: stroke fill;
 		opacity: 0.78;
 	}
 </style>
