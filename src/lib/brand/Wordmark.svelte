@@ -18,11 +18,11 @@
 	aria-labelledby="friboard-wordmark-title"
 	style="--scale: {size};"
 >
-	<title id="friboard-wordmark-title">FRIBOARD</title>
+	<title id="friboard-wordmark-title">ABENERP</title>
 	<defs>
 		<linearGradient id="friboard-gold" x1="0%" y1="0%" x2="0%" y2="100%">
-			<stop offset="0%" stop-color="#e2c089" />
-			<stop offset="100%" stop-color="#b88a4a" />
+			<stop offset="0%" stop-color="#f2cb6e" />
+			<stop offset="100%" stop-color="#c2862b" />
 		</linearGradient>
 	</defs>
 
@@ -31,11 +31,11 @@
 			A —
 		</text>
 		<text class="lettering" x="400" y="180" text-anchor="middle" fill="url(#friboard-gold)">
-			FRIBOARD
+			ABENERP
 		</text>
 	{:else}
 		<text class="lettering" x="400" y="100" text-anchor="middle" fill="url(#friboard-gold)">
-			FRIBOARD
+			ABENERP
 		</text>
 	{/if}
 </svg>

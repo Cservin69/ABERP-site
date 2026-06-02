@@ -5,10 +5,10 @@
 </script>
 
 <svelte:head>
-	<title>Friboard — custom manufacturing on demand</title>
+	<title>ABENERP — custom manufacturing on demand</title>
 	<meta
 		name="description"
-		content="Friboard makes custom manufactured parts. Upload your CAD, get a quote, get it made."
+		content="ABENERP makes custom manufactured parts. Upload your CAD, get a quote, get it made."
 	/>
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
 </svelte:head>
@@ -78,15 +78,15 @@
 	}
 
 	.tag-accent {
-		color: #d4a574;
+		color: #d8a753;
 		margin-right: 0.35em;
 	}
 
 	.cta {
 		display: inline-block;
 		padding: 0.85rem 2.25rem;
-		border: 1px solid #d4a574;
-		color: #d4a574;
+		border: 1px solid #d8a753;
+		color: #d8a753;
 		text-decoration: none;
 		font-size: 1rem;
 		letter-spacing: 0.1em;
@@ -99,7 +99,7 @@
 
 	.cta:hover,
 	.cta:focus-visible {
-		background: #d4a574;
+		background: #d8a753;
 		color: #0f1320;
 		outline: none;
 	}
@@ -134,8 +134,8 @@
 
 	.footer-links a:hover,
 	.footer-links a:focus-visible {
-		color: #d4a574;
-		border-bottom-color: #d4a574;
+		color: #d8a753;
+		border-bottom-color: #d8a753;
 		outline: none;
 	}
 

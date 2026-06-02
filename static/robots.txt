@@ -2,4 +2,4 @@
 User-agent: *
 Disallow:
 
-Sitemap: https://friboard.com/sitemap.xml
+Sitemap: https://abenerp.com/sitemap.xml
