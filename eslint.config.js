@@ -47,6 +47,18 @@ export default defineConfig(
 	{
 		// Override or add rule settings here, such as:
 		// 'svelte/button-has-type': 'error'
-		rules: {}
+		rules: {
+			// Honor the `_`-prefix convention for intentionally-unused bindings
+			// (e.g. mock signatures like `(_opts: MailOpts) => ...`). The codebase
+			// already relies on this; typescript-eslint just doesn't enable it by default.
+			'@typescript-eslint/no-unused-vars': [
+				'error',
+				{
+					argsIgnorePattern: '^_',
+					varsIgnorePattern: '^_',
+					caughtErrorsIgnorePattern: '^_'
+				}
+			]
+		}
 	}
 );
