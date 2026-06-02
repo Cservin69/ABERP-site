@@ -35,6 +35,8 @@ export interface QuoteMetadata {
 	status: string;
 	consent_at: string;
 	status_history?: QuoteStatusHistoryEntry[];
+	/** ISO timestamp set once submission notifications have been dispatched. */
+	notified_at?: string;
 }
 
 function quoteRoot(): string {

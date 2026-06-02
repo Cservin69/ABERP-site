@@ -3,6 +3,8 @@ import { json } from '@sveltejs/kit';
 import { writeFile, mkdir } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { resolve as pathResolve, join, basename, extname } from 'node:path';
+import type { QuoteMetadata } from '$lib/server/quote-store';
+import { sendQuoteNotifications } from '$lib/server/email';
 
 const QUOTE_DIR = process.env.ABERP_SITE_QUOTE_DIR ?? './data/quotes';
 const MAX_TOTAL_BYTES = 50 * 1024 * 1024;
@@ -174,7 +176,7 @@ export const POST: RequestHandler = async ({ request }) => {
 	}
 
 	const nowIso = new Date().toISOString();
-	const metadata = {
+	const metadata: QuoteMetadata = {
 		id,
 		received_at: nowIso,
 		contact: {
@@ -189,11 +191,26 @@ export const POST: RequestHandler = async ({ request }) => {
 			notes: notesTrim
 		},
 		files: storedFiles,
-		status: 'received' as const,
+		status: 'received',
 		consent_at: nowIso
 	};
 
-	await writeFile(join(quoteDir, 'metadata.json'), JSON.stringify(metadata, null, 2), 'utf8');
+	const metadataPath = join(quoteDir, 'metadata.json');
+	// Persist the quote BEFORE notifying. The quote on disk is the source of
+	// truth; a lost notification is recoverable from /admin/quotes, a lost quote
+	// is not. Notification is best-effort and never blocks the 200 response.
+	await writeFile(metadataPath, JSON.stringify(metadata, null, 2), 'utf8');
+
+	try {
+		const notify = await sendQuoteNotifications(metadata);
+		if (notify.operator === 'sent' || notify.customer === 'sent') {
+			metadata.notified_at = new Date().toISOString();
+			await writeFile(metadataPath, JSON.stringify(metadata, null, 2), 'utf8');
+		}
+	} catch (err) {
+		// sendQuoteNotifications is contractually non-throwing; this is belt-and-braces.
+		console.error('[quote] notification dispatch error:', err);
+	}
 
 	return json({ id, status: 'received' });
 };
