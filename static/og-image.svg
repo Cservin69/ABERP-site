@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
-  <title>Friboard — Your CAD. Your part. Made.</title>
+  <title>ABENERP — Your CAD. Your part. Made.</title>
   <defs>
     <linearGradient id="gold" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#e2c089"/>
-      <stop offset="100%" stop-color="#b88a4a"/>
+      <stop offset="0%" stop-color="#f2cb6e"/>
+      <stop offset="100%" stop-color="#c2862b"/>
     </linearGradient>
     <linearGradient id="bg" x1="0%" y1="0%" x2="0%" y2="100%">
       <stop offset="0%" stop-color="#0f1320"/>
@@ -34,7 +34,7 @@
     font-size="120"
     letter-spacing="14"
     fill="url(#gold)"
-  >FRIBOARD</text>
+  >ABENERP</text>
 
   <text
     x="600"

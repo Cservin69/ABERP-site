@@ -10,7 +10,7 @@
 
 <div class="admin-shell">
 	<header class="admin-header">
-		<a class="brand" href={resolve('/admin/quotes')}>Friboard admin</a>
+		<a class="brand" href={resolve('/admin/quotes')}>ABENERP admin</a>
 		<nav>
 			<a href={resolve('/admin/quotes')}>Quotes</a>
 			{#if data.authed}

@@ -93,10 +93,10 @@
 </script>
 
 <svelte:head>
-	<title>Get a quote — Friboard</title>
+	<title>Get a quote — ABENERP</title>
 	<meta
 		name="description"
-		content="Request a manufacturing quote from Friboard. Upload your CAD files and we'll get back to you within two business days."
+		content="Request a manufacturing quote from ABENERP. Upload your CAD files and we'll get back to you within two business days."
 	/>
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
 </svelte:head>
@@ -104,7 +104,7 @@
 <main class="page">
 	<div class="container">
 		<header class="top">
-			<a href={resolve('/')} class="back">← Friboard</a>
+			<a href={resolve('/')} class="back">← ABENERP</a>
 			<div class="wordmark-wrap"><Wordmark size={0.5} showMonogram={false} /></div>
 			<h1>Get a quote</h1>
 			<p class="subtitle">

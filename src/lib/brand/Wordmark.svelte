@@ -15,26 +15,26 @@
 	xmlns="http://www.w3.org/2000/svg"
 	viewBox="0 0 {viewBoxWidth} {viewBoxHeight}"
 	role="img"
-	aria-labelledby="friboard-wordmark-title"
+	aria-labelledby="abenerp-wordmark-title"
 	style="--scale: {size};"
 >
-	<title id="friboard-wordmark-title">ABENERP</title>
+	<title id="abenerp-wordmark-title">ABENERP</title>
 	<defs>
-		<linearGradient id="friboard-gold" x1="0%" y1="0%" x2="0%" y2="100%">
+		<linearGradient id="abenerp-gold" x1="0%" y1="0%" x2="0%" y2="100%">
 			<stop offset="0%" stop-color="#f2cb6e" />
 			<stop offset="100%" stop-color="#c2862b" />
 		</linearGradient>
 	</defs>
 
 	{#if showMonogram}
-		<text class="monogram" x="400" y="68" text-anchor="middle" fill="url(#friboard-gold)">
+		<text class="monogram" x="400" y="68" text-anchor="middle" fill="url(#abenerp-gold)">
 			A —
 		</text>
-		<text class="lettering" x="400" y="180" text-anchor="middle" fill="url(#friboard-gold)">
+		<text class="lettering" x="400" y="180" text-anchor="middle" fill="url(#abenerp-gold)">
 			ABENERP
 		</text>
 	{:else}
-		<text class="lettering" x="400" y="100" text-anchor="middle" fill="url(#friboard-gold)">
+		<text class="lettering" x="400" y="100" text-anchor="middle" fill="url(#abenerp-gold)">
 			ABENERP
 		</text>
 	{/if}

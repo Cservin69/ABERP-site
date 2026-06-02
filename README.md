@@ -1,8 +1,8 @@
 # ABERP-site
 
-Stage 2 customer-facing storefront for **friboard.com** — Áben's custom manufacturing offering. Sibling to ABERP (the back-office invoicing/ledger system).
+Stage 2 customer-facing storefront for **abenerp.com** — Áben's custom manufacturing offering. Sibling to ABERP (the back-office invoicing/ledger system).
 
-This repo is internal code under the Áben umbrella; the customer surface lives at **friboard.com**.
+This repo is internal code under the Áben umbrella; the customer surface lives at **abenerp.com**.
 
 ## Status
 

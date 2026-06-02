@@ -30,7 +30,7 @@
 </script>
 
 <svelte:head>
-	<title>Quote {data.quote.id.slice(0, 8)} — Friboard admin</title>
+	<title>Quote {data.quote.id.slice(0, 8)} — ABENERP admin</title>
 </svelte:head>
 
 <a class="back" href={resolve('/admin/quotes')}>← All quotes</a>

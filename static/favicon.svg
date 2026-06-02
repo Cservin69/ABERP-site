@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <title>Friboard</title>
+  <title>ABENERP</title>
   <defs>
     <linearGradient id="g" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#e2c089"/>
-      <stop offset="100%" stop-color="#b88a4a"/>
+      <stop offset="0%" stop-color="#f2cb6e"/>
+      <stop offset="100%" stop-color="#c2862b"/>
     </linearGradient>
   </defs>
   <rect width="64" height="64" rx="10" fill="#0f1320"/>
@@ -16,5 +16,5 @@
     font-size="40"
     letter-spacing="1"
     fill="url(#g)"
-  >F</text>
+  >A</text>
 </svg>

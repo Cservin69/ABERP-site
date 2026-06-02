@@ -12,7 +12,7 @@
 </script>
 
 <svelte:head>
-	<title>Quotes — Friboard admin</title>
+	<title>Quotes — ABENERP admin</title>
 </svelte:head>
 
 <h1>Quotes</h1>

@@ -9,7 +9,7 @@
 </script>
 
 <svelte:head>
-	<title>Admin sign-in — Friboard</title>
+	<title>Admin sign-in — ABENERP</title>
 </svelte:head>
 
 <section class="login">
