@@ -1,6 +1,7 @@
 import { env } from '$env/dynamic/private';
 import nodemailer, { type Transporter } from 'nodemailer';
 import type { QuoteMetadata } from './quote-store';
+import { signQuoteToken } from './quote-token';
 
 /**
  * Transactional email for quote notifications. SERVER-ONLY.
@@ -283,4 +284,30 @@ export async function sendQuoteNotifications(q: QuoteMetadata): Promise<NotifyRe
 	}
 
 	return result;
+}
+
+// --- Customer-facing status URLs -----------------------------------------
+// Single source of truth for customer-facing quote URLs and the confirmation
+// subject. The confirmation send path above (sendQuoteNotifications) can import
+// buildQuoteStatusUrl so the signed link is generated in exactly one place.
+const DEFAULT_BASE_URL = 'https://abenerp.com';
+
+function publicBaseUrl(): string {
+	const raw = env.ABERP_SITE_PUBLIC_BASE_URL ?? DEFAULT_BASE_URL;
+	return raw.replace(/\/+$/, '');
+}
+
+/**
+ * The read-only status page link for a quote, with its signed token attached:
+ *   https://abenerp.com/q/<id>?t=<token>
+ * Without the `?t=` token the route 404s, so this URL is the only way in.
+ */
+export function buildQuoteStatusUrl(id: string): string {
+	const token = signQuoteToken(id);
+	return `${publicBaseUrl()}/q/${encodeURIComponent(id)}?t=${token}`;
+}
+
+/** Subject line for the customer confirmation email — "Ajánlat visszaigazolás <short id>". */
+export function quoteConfirmationSubject(id: string): string {
+	return `Ajánlat visszaigazolás ${id.slice(0, 8)}`;
 }
