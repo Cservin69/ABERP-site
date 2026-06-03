@@ -3,10 +3,10 @@
 </script>
 
 <svelte:head>
-	<title>Privacy — Friboard</title>
+	<title>Privacy — ABENERP</title>
 	<meta
 		name="description"
-		content="Privacy policy for friboard.com. No cookies, no analytics, no third-party tracking."
+		content="Privacy policy for abenerp.com. No cookies, no analytics, no third-party tracking."
 	/>
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
 </svelte:head>
@@ -14,7 +14,7 @@
 <main class="page">
 	<div class="container">
 		<header class="top">
-			<a href={resolve('/')} class="back">← Friboard</a>
+			<a href={resolve('/')} class="back">← ABENERP</a>
 			<h1>Privacy policy</h1>
 			<p class="meta">Last reviewed: 2026-05-31</p>
 		</header>
@@ -27,8 +27,8 @@
 				>
 			</p>
 			<p>
-				The only contact path on friboard.com is a <code>mailto:</code> link. Clicking it opens your email
-				client — the email is sent from your provider to ours, without traversing friboard.com infrastructure.
+				The only contact path on abenerp.com is a <code>mailto:</code> link. Clicking it opens your email
+				client — the email is sent from your provider to ours, without traversing abenerp.com infrastructure.
 			</p>
 		</section>
 
@@ -42,7 +42,7 @@
 					and debugging purposes. It is not used for analytics, profiling, or marketing.
 				</li>
 				<li>
-					<strong>Email contact.</strong> When you email <code>hello@friboard.com</code>, the
+					<strong>Email contact.</strong> When you email <code>contact@abenerp.com</code>, the
 					contents and your email address are processed by our email provider under that provider's
 					privacy policy. We use this data only to respond to your inquiry. Retention is determined
 					by the email provider; assume up to 24 months unless you request earlier deletion.
@@ -63,20 +63,20 @@
 				</li>
 				<li>
 					<strong>CAD files you upload</strong> and their original filenames, sizes, and submission timestamp.
-					CAD files are treated as customer intellectual property and are not shared outside Friboard's
+					CAD files are treated as customer intellectual property and are not shared outside ABENERP's
 					quoting workflow.
 				</li>
 				<li><strong>Consent timestamp.</strong></li>
 			</ul>
 			<p>
-				<strong>Where it lives.</strong> During Phase 2 the data is stored on the Friboard
-				operator's instance; it is not yet integrated into the ABERP order-management system.
+				<strong>Where it lives.</strong> During Phase 2 the data is stored on the ABENERP operator's
+				instance; it is not yet integrated into the ABERP order-management system.
 				<strong>Retention</strong> is determined by the operator and is documented in the operator
 				runbook. <strong>Lawful basis:</strong> pre-contractual steps at your request, GDPR Art. 6(1)(b).
 			</p>
 			<p>
 				To exercise any GDPR right in respect of a quote request, email
-				<a href="mailto:hello@friboard.com">hello@friboard.com</a> and include the quote reference ID
+				<a href="mailto:contact@abenerp.com">contact@abenerp.com</a> and include the quote reference ID
 				shown on screen after submission.
 			</p>
 		</section>
@@ -113,7 +113,7 @@
 			<h2>Your rights under GDPR</h2>
 			<p>
 				You have the following rights regarding any personal data we process. To exercise any of
-				them, email <a href="mailto:hello@friboard.com">hello@friboard.com</a> and we will respond within
+				them, email <a href="mailto:contact@abenerp.com">contact@abenerp.com</a> and we will respond within
 				30 days.
 			</p>
 			<ul>
@@ -155,7 +155,7 @@
 				Áben Consulting Kft.<br />
 				Tax ID: HU24904362-2-41<br />
 				1037 Budapest, Visszatérő köz 6, Hungary<br />
-				Email: <a href="mailto:hello@friboard.com">hello@friboard.com</a>
+				Email: <a href="mailto:contact@abenerp.com">contact@abenerp.com</a>
 			</address>
 		</section>
 

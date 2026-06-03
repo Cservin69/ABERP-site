@@ -76,7 +76,8 @@ Follow `docs/aws/lightsail-bootstrap.md` for the narrative.
       name `aberp-site`.
 - [ ] Networking → Static IPs → create + attach to the instance.
 - [ ] Storage → Create disk: 20 GB, name `aberp-site-data`, attach to
-      `aberp-site` (mounts as `/dev/xvdf`).
+      `aberp-site` (mounts as `/dev/nvme1n1` on current Nitro Lightsail, or
+      `/dev/xvdf` on older Xen instances — the bootstrap auto-detects).
 - [ ] SSH in: `ssh ubuntu@<static-ip>`.
 - [ ] Clone the repo: `git clone https://github.com/Cservin69/ABERP-site.git`.
 
@@ -109,8 +110,16 @@ sudo SSM_ACTIVATION_CODE=<code> \
 
 - [ ] Generate the admin token: `sudo openssl rand -hex 32` — copy the output.
 - [ ] Generate the CloudFront shared secret: `sudo openssl rand -hex 32`.
-- [ ] Edit `/etc/aberp-site.env` (`sudo $EDITOR …`) and fill: - `ABERP_SITE_ADMIN_TOKEN=<admin token>` - `CLOUDFRONT_SHARED_SECRET=<cloudfront secret>` - Leave `HOST`, `PORT`, `ORIGIN`, `ABERP_SITE_QUOTE_DIR`, `NODE_ENV`,
-      `BODY_SIZE_LIMIT` at their defaults unless you have a reason to change.
+- [ ] Edit `/etc/aberp-site.env` (`sudo $EDITOR …`) and fill: - `ABERP_SITE_ADMIN_TOKEN=<admin token>` - `CLOUDFRONT_SHARED_SECRET=<cloudfront secret>` - `QUOTE_STATUS_SIGNING_KEY=<openssl rand -hex 32>` (required for the
+      customer-facing /q/<id>?t=… status page; missing key returns 503 on
+      every quote confirmation send) - `SMTP_HOST`/`SMTP_PORT`/`SMTP_SECURE`/
+      `SMTP_USER`/`SMTP_PASS`/`SMTP_FROM` + `ABERP_SITE_OPERATOR_EMAIL` if you
+      want the transactional confirmation + alert emails to actually send;
+      with `SMTP_HOST` blank the send path no-ops gracefully. Leave `HOST`,
+      `PORT`, `PROTOCOL_HEADER`, `HOST_HEADER`, `ABERP_SITE_QUOTE_DIR`,
+      `NODE_ENV`, `BODY_SIZE_LIMIT`, `ABERP_SITE_PUBLIC_URL`, and
+      `ABERP_SITE_PUBLIC_BASE_URL` at their defaults unless you have a reason
+      to change.
       The bootstrap script pins `BODY_SIZE_LIMIT=52428800` (50 MB) — without
       it, adapter-node silently 413s every CAD upload at 512 KB. The
       `aberp-site.service` unit also sets it via `Environment=` as a

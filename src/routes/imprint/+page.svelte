@@ -3,15 +3,15 @@
 </script>
 
 <svelte:head>
-	<title>Imprint — Friboard</title>
-	<meta name="description" content="Legal imprint and operator information for friboard.com." />
+	<title>Imprint — ABENERP</title>
+	<meta name="description" content="Legal imprint and operator information for abenerp.com." />
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
 </svelte:head>
 
 <main class="page">
 	<div class="container">
 		<header class="top">
-			<a href={resolve('/')} class="back">← Friboard</a>
+			<a href={resolve('/')} class="back">← ABENERP</a>
 			<h1>Imprint</h1>
 			<p class="meta">Operator information / Impresszum</p>
 		</header>
@@ -22,7 +22,7 @@
 				<strong>Áben Consulting Kft.</strong><br />
 				Tax ID (Adószám): HU24904362-2-41<br />
 				Registered address: 1037 Budapest, Visszatérő köz 6, Hungary<br />
-				Email: <a href="mailto:hello@friboard.com">hello@friboard.com</a>
+				Email: <a href="mailto:contact@abenerp.com">contact@abenerp.com</a>
 			</address>
 		</section>
 
@@ -44,7 +44,7 @@
 			<h2>Contact</h2>
 			<p>
 				For all inquiries (commercial, technical, or legal) please email
-				<a href="mailto:hello@friboard.com">hello@friboard.com</a>. We aim to respond within two
+				<a href="mailto:contact@abenerp.com">contact@abenerp.com</a>. We aim to respond within two
 				business days.
 			</p>
 		</section>
@@ -52,7 +52,7 @@
 		<section>
 			<h2>Hosting</h2>
 			<p>
-				friboard.com is served from Amazon Web Services. Static assets are stored in S3 (<code
+				abenerp.com is served from Amazon Web Services. Static assets are stored in S3 (<code
 					>eu-central-1</code
 				>, Frankfurt) and delivered globally via Amazon CloudFront.
 			</p>

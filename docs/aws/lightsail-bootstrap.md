@@ -43,7 +43,9 @@ Storage → Create disk:
 - Region: same as the instance.
 - Size: **20 GB** (cheap headroom for v1 quote volume; resize later if needed).
 - Name: `aberp-site-data`.
-- Attach to: `aberp-site`. Mounts as `/dev/xvdf`.
+- Attach to: `aberp-site`. Mounts as `/dev/nvme1n1` on current Nitro-based
+  Lightsail (older Xen instances exposed it as `/dev/xvdf`; the bootstrap
+  detects either, or honours `ABERP_DATA_DISK=/dev/<name>` if set).
 
 ### 4. SSH in and clone the repo
 
@@ -84,10 +86,11 @@ The script:
 1. Updates the system + installs base packages.
 2. Installs Node 20 LTS.
 3. Creates the `aberp` system user and `/home/aberp/{releases,logs}`.
-4. Initialises `/dev/xvdf` (mkfs.ext4 — **destructive on first run**, skipped
-   afterwards if a filesystem signature exists), mounts it at
-   `/mnt/aberp-data`, adds an fstab entry, and symlinks
-   `/home/aberp/data → /mnt/aberp-data`.
+4. Initialises the attached data disk (detected as `/dev/nvme1n1`, then
+   `/dev/xvdf`, then any unmounted whole disk; override with
+   `ABERP_DATA_DISK=…`). mkfs.ext4 — **destructive on first run**, skipped
+   afterwards if a filesystem signature exists. Mounts at `/mnt/aberp-data`,
+   adds an fstab entry, and symlinks `/home/aberp/data → /mnt/aberp-data`.
 5. Installs the SSM Agent (snap) and registers as hybrid instance using your
    activation code/id. Print out the resulting `mi-…` instance ID afterwards
    with `cat /var/lib/amazon/ssm/registration` or via the SSM Fleet Manager UI.
@@ -95,9 +98,15 @@ The script:
 7. Drops `lightsail-deploy.sh` into `/home/aberp/`.
 8. Installs the systemd unit (`aberp-site.service`) and enables it.
 9. Writes the `/etc/aberp-site.env` template.
-10. Configures `ufw` to allow only SSH on the OS firewall (CloudFront origin
-    traffic is handled separately — see CloudFront behaviours doc).
-11. Installs a logrotate config for the Node process logs.
+10. Configures `ufw` to allow SSH, HTTP (`80`), and the Node listener
+    (`3000`). Ubuntu 22.04 enables `ufw` by default with only SSH allowed;
+    without the extra rules CloudFront origin traffic to `:3000` is silently
+    dropped even when the Lightsail console firewall permits it.
+11. Creates a 2 GB `/swapfile` (idempotent — skipped if any swap is already
+    active) so `npm ci` does not OOM on the 512 MB Nano plan.
+12. Writes `/etc/sudoers.d/aberp-systemctl` so the `aberp` user can restart
+    the `aberp-site` unit without a password (scoped to that single unit).
+13. Installs a logrotate config for the Node process logs.
 
 ### 7. Fill in the env file
 

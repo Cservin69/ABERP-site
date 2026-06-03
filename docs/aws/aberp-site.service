@@ -1,5 +1,5 @@
 [Unit]
-Description=ABERP-site (Friboard) SvelteKit Node server
+Description=ABERP-site SvelteKit Node server
 After=network-online.target
 Wants=network-online.target
 
