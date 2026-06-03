@@ -1,0 +1,8 @@
+PR-P fixture for content-sniffing tests                                 S      1
+1H,,1H;,5HFIX-P,12HVALID.IGES,5HVITEST,8HUNCLASS,                       G      1
+32,38,6,308,15,5HFIX-P,1.,1,4HMM,1,0.01,15H20260603.000000,             G      2
+1.E-08,2.,4HPRPP,5HABERP,11,0,15H20260603.000000;                       G      3
+116      1                                               00000000       D      1
+116      0       0       1       0                            0         D      2
+116,0.0,0.0,0.0,0,0,0;                                                  P      1
+S      1G      3D      2P      1                                        T      1

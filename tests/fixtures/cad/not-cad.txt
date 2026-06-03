@@ -1,0 +1,2 @@
+This is plain text, not a CAD file at all.
+PR-P fixture used to verify content-sniffing rejection messages.

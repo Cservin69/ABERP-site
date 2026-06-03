@@ -21,6 +21,7 @@
 	let fileInput: HTMLInputElement | undefined = $state();
 	let submitting = $state(false);
 	let errorMessage = $state<string | null>(null);
+	let rejectedFiles = $state<{ filename: string; reason: string }[]>([]);
 	let successId = $state<string | null>(null);
 
 	const emailValid = $derived(
@@ -43,6 +44,9 @@
 			}
 		}
 		files = merged.slice(0, MAX_FILES);
+		// User is picking new files — clear any stale per-file rejection notes
+		// from the previous attempt.
+		rejectedFiles = [];
 		input.value = '';
 	}
 
@@ -61,6 +65,7 @@
 		if (!formValid || submitting) return;
 		submitting = true;
 		errorMessage = null;
+		rejectedFiles = [];
 
 		const body = new FormData();
 		body.append('name', name.trim());
@@ -78,7 +83,22 @@
 
 		try {
 			const res = await fetch('/api/quote', { method: 'POST', body });
-			const data = (await res.json()) as { id?: string; error?: string };
+			const data = (await res.json()) as {
+				id?: string;
+				error?: string;
+				files?: { filename: string; reason: string }[];
+			};
+			if (data.error === 'invalid_file' && data.files && data.files.length > 0) {
+				// Per-file content-validation failure. Render reasons next to the
+				// file area (not the top-level error banner) and reset the
+				// offending entries so the customer can replace them; the valid
+				// files stay so they don't lose their work.
+				const rejectedNames = new Set(data.files.map((f) => f.filename));
+				rejectedFiles = data.files;
+				files = files.filter((f) => !rejectedNames.has(f.name));
+				submitting = false;
+				return;
+			}
 			if (!res.ok || !data.id) {
 				errorMessage = data.error ?? 'Submission failed. Please try again.';
 				submitting = false;
@@ -234,6 +254,22 @@
 								<span class="warn">— over 50 MB cap, please remove files</span>
 							{/if}
 						</p>
+					{/if}
+					{#if rejectedFiles.length > 0}
+						<ul class="rejected-list" role="alert" aria-live="polite">
+							{#each rejectedFiles as r (r.filename)}
+								<li>
+									<span class="rfname">{r.filename}</span>
+									<span class="rreason">{r.reason}</span>
+								</li>
+							{/each}
+							<li class="rejected-hint">
+								Please re-upload {rejectedFiles.length === 1
+									? 'a valid CAD file'
+									: 'valid CAD files'}
+								in place of the {rejectedFiles.length === 1 ? 'one above' : 'ones above'}.
+							</li>
+						</ul>
 					{/if}
 				</div>
 
@@ -516,6 +552,36 @@
 
 	.totals .warn {
 		font-weight: 500;
+	}
+
+	.rejected-list {
+		list-style: none;
+		padding: 0.65rem 0.8rem;
+		margin: 0.75rem 0 0;
+		background: rgba(198, 106, 106, 0.12);
+		border: 1px solid rgba(198, 106, 106, 0.5);
+		color: #e8a8a8;
+		font-size: 0.85rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.4rem;
+	}
+
+	.rejected-list .rfname {
+		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-weight: 500;
+		display: inline-block;
+		margin-right: 0.5rem;
+	}
+
+	.rejected-list .rreason {
+		color: rgba(243, 238, 229, 0.85);
+	}
+
+	.rejected-list .rejected-hint {
+		color: rgba(243, 238, 229, 0.7);
+		font-style: italic;
+		font-size: 0.8rem;
 	}
 
 	.counter {

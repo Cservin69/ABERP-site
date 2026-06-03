@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { resolve as pathResolve, join, basename, extname } from 'node:path';
 import type { QuoteMetadata } from '$lib/server/quote-store';
 import { sendQuoteNotifications } from '$lib/server/email';
+import { validateCadFile } from '$lib/server/cad-validate';
 
 const QUOTE_DIR = process.env.ABERP_SITE_QUOTE_DIR ?? './data/quotes';
 const MAX_TOTAL_BYTES = 50 * 1024 * 1024;
@@ -130,7 +131,6 @@ export const POST: RequestHandler = async ({ request }) => {
 
 	let totalBytes = 0;
 	for (const f of fileEntries) {
-		if (f.size === 0) return bad(`Empty file: ${f.name}`);
 		const ext = extname(f.name).toLowerCase();
 		if (!ALLOWED_EXT.has(ext)) {
 			return bad(`File type not allowed: ${f.name}`);
@@ -139,6 +139,23 @@ export const POST: RequestHandler = async ({ request }) => {
 		if (totalBytes > MAX_TOTAL_BYTES) {
 			return bad('Total upload size exceeds 50 MB.');
 		}
+	}
+
+	// Read each file once, run content-sniffing validation, hold the buffers
+	// until persistence. The upload cap (MAX_TOTAL_BYTES = 50 MB) bounds memory.
+	const loaded: { file: File; buf: Buffer }[] = [];
+	const invalidFiles: { filename: string; reason: string }[] = [];
+	for (const f of fileEntries) {
+		const buf = Buffer.from(await f.arrayBuffer());
+		const result = validateCadFile(f.name, buf);
+		if (!result.valid) {
+			invalidFiles.push({ filename: f.name, reason: result.reason });
+		} else {
+			loaded.push({ file: f, buf });
+		}
+	}
+	if (invalidFiles.length > 0) {
+		return json({ error: 'invalid_file', files: invalidFiles }, { status: 400 });
 	}
 
 	const id = randomUUID();
@@ -152,7 +169,7 @@ export const POST: RequestHandler = async ({ request }) => {
 	const storedFiles: { filename: string; size_bytes: number; stored_at: string }[] = [];
 	const seenNames = new Set<string>();
 
-	for (const f of fileEntries) {
+	for (const { file: f, buf } of loaded) {
 		const safe = sanitizeFilename(f.name);
 		let candidate = safe;
 		let suffix = 1;
@@ -166,7 +183,6 @@ export const POST: RequestHandler = async ({ request }) => {
 
 		const dest = join(filesDir, candidate);
 		if (!pathResolve(dest).startsWith(filesDir)) return bad('Internal error.');
-		const buf = Buffer.from(await f.arrayBuffer());
 		await writeFile(dest, buf);
 		storedFiles.push({
 			filename: candidate,
