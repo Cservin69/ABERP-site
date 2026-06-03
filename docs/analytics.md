@@ -1,6 +1,6 @@
 # Analytics — Phase 1 decision
 
-**Decision:** No analytics on friboard.com in Phase 1.
+**Decision:** No analytics on abenerp.com in Phase 1.
 
 ## Rationale
 

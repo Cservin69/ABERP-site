@@ -1,13 +1,13 @@
 # ABERP-site AWS provisioning checklist
 
-Linear recipe to take this repo from "code committed" to "friboard.com live on
+Linear recipe to take this repo from "code committed" to "abenerp.com live on
 AWS, deploys via `git push`." Follow each step in order. The checklist itself
 is self-contained; each step links to the deeper doc.
 
 ## Pre-requisites
 
 - [ ] AWS account with admin access, billing enabled.
-- [ ] Route 53 hosted zone for `friboard.com` (existing, per Phase 1).
+- [ ] Route 53 hosted zone for `abenerp.com` (existing, per Phase 1).
 - [ ] AWS CLI v2 installed locally; `aws sts get-caller-identity` works.
 - [ ] You're on macOS / Linux with `git`, `openssl`, `ssh`.
 - [ ] Existing Phase 1 S3 bucket name + CloudFront distribution ID handy (the
@@ -165,12 +165,12 @@ If you bind Node directly to `0.0.0.0:3000`:
       (Systems Manager → Fleet Manager).
 - [ ] On success:
       `sh
-      curl -fsS https://friboard.com/ # → 200, prerendered home
-      curl -fsS https://friboard.com/quote # → 200, SSR form HTML
-      curl -fsS https://friboard.com/api/quotes
+      curl -fsS https://abenerp.com/ # → 200, prerendered home
+      curl -fsS https://abenerp.com/quote # → 200, SSR form HTML
+      curl -fsS https://abenerp.com/api/quotes
   # → 401 without bearer (good)
   curl -fsS -H "Authorization: Bearer <admin-token>" \
-   https://friboard.com/api/quotes
+   https://abenerp.com/api/quotes
   # → 200 [] (good)
   `
 
@@ -199,7 +199,7 @@ pause at the environment-protection gate until Ervin approves them.
 ## Step 11 — ABERP integration (post-launch, separate session)
 
 - [ ] In the ABERP Tenant Settings → Quote Intake panel: set the base URL to
-      `https://friboard.com` and the admin token to the value from Step 7.
+      `https://abenerp.com` and the admin token to the value from Step 7.
 - [ ] Verify the polling loop end-to-end: submit a quote on
       `/quote`, see it land in ABERP within a poll cycle.
 

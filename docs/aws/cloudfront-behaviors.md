@@ -1,8 +1,8 @@
 # CloudFront behaviour configuration
 
-The friboard.com distribution serves two origins:
+The abenerp.com distribution serves two origins:
 
-- **S3** — `friboard-com-www.s3.eu-central-1.amazonaws.com` via Origin Access
+- **S3** — `abenerp-com-www.s3.eu-central-1.amazonaws.com` via Origin Access
   Control (OAC). Holds the static surface and the prerendered HTML.
 - **Lightsail** — `<static-ip>` on port `80` (with nginx) or `3000` (Node
   directly). Serves the dynamic surface.
@@ -99,7 +99,7 @@ on the next pass anyway.
 ## Distribution-level settings
 
 - **Price class:** PriceClass_100 (NA + EU only) — EU-first audience.
-- **Alternate domain names:** `friboard.com`, `www.friboard.com`.
+- **Alternate domain names:** `abenerp.com`, `www.abenerp.com`.
 - **SSL certificate:** the ACM cert (us-east-1) for both names.
 - **Security policy:** TLSv1.2_2021.
 - **HTTP versions:** HTTP/2 + HTTP/3.
@@ -111,27 +111,27 @@ on the next pass anyway.
 
 ```sh
 # Static — should hit S3, cacheable.
-curl -sIo /dev/null -w '%{http_code} %{header_age}\n' https://friboard.com/
-curl -sIo /dev/null -w '%{http_code} %{header_age}\n' https://friboard.com/privacy
-curl -sIo /dev/null -w '%{http_code}\n' https://friboard.com/favicon.svg
+curl -sIo /dev/null -w '%{http_code} %{header_age}\n' https://abenerp.com/
+curl -sIo /dev/null -w '%{http_code} %{header_age}\n' https://abenerp.com/privacy
+curl -sIo /dev/null -w '%{http_code}\n' https://abenerp.com/favicon.svg
 
 # Dynamic — should hit Lightsail.
-curl -sIo /dev/null -w '%{http_code}\n' https://friboard.com/quote
+curl -sIo /dev/null -w '%{http_code}\n' https://abenerp.com/quote
 
 # /api/quote (public POST) — should succeed without auth.
 curl -sIo /dev/null -X POST -H 'Content-Type: application/json' \
   -d '{"email":"smoke@example.com"}' \
-  https://friboard.com/api/quote -w '%{http_code}\n'
+  https://abenerp.com/api/quote -w '%{http_code}\n'
 # Expect 400-ish (validation error) — proves it reached the Node server.
 
 # /api/quotes (operator GET) — should 401 without bearer.
-curl -sIo /dev/null https://friboard.com/api/quotes -w '%{http_code}\n'
+curl -sIo /dev/null https://abenerp.com/api/quotes -w '%{http_code}\n'
 # Expect 401.
 
 # /api/quotes with admin bearer — should 200.
 curl -sIo /dev/null \
   -H "Authorization: Bearer $ABERP_SITE_ADMIN_TOKEN" \
-  https://friboard.com/api/quotes -w '%{http_code}\n'
+  https://abenerp.com/api/quotes -w '%{http_code}\n'
 ```
 
 If `/quote` returns 403 with body `forbidden: missing origin signature`, the

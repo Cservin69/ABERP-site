@@ -4,12 +4,12 @@ The imprint (`/imprint`) page is required under EU/Hungarian law for any commerc
 
 ## Required fields
 
-- **Company name:** Áben Consulting Kft. _(placeholder — confirm whether a separate Friboard entity will own this site)_
+- **Company name:** Áben Consulting Kft. _(placeholder — confirm whether a separate ABENERP entity will own this site)_
 - **Tax ID (Adószám):** HU24904362-2-41 _(placeholder, same caveat)_
 - **Registered address:** 1037 Budapest, Visszatérő köz 6, Hungary
 - **Court of registration:** **[PLACEHOLDER]** — likely Fővárosi Törvényszék Cégbírósága; Ervin to confirm.
 - **Company registration number (Cégjegyzékszám):** **[PLACEHOLDER]** — 10-digit number issued by the court of registration.
-- **Contact email:** `hello@friboard.com`
+- **Contact email:** `contact@abenerp.com`
 - **Authorized representative (Képviselő):** **[PLACEHOLDER]** — name(s) of the managing director(s) with signing authority.
 
 ## Optional but recommended
@@ -20,7 +20,7 @@ The imprint (`/imprint`) page is required under EU/Hungarian law for any commerc
 
 ## Action items before public launch
 
-1. Confirm controlling entity (Áben Consulting Kft. vs. a new Friboard Kft.).
+1. Confirm controlling entity (Áben Consulting Kft. vs. a new ABENERP Kft.).
 2. Fill the three **[PLACEHOLDER]** fields.
 3. Re-review privacy policy data-controller paragraph against the confirmed entity.
 4. Decide whether to publish a telephone number.

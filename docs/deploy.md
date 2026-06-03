@@ -1,4 +1,4 @@
-# Deploy runbook — friboard.com (AWS S3 + CloudFront + Lightsail)
+# Deploy runbook — abenerp.com (AWS S3 + CloudFront + Lightsail)
 
 **Status:** documentation only. No AWS resources are created or modified by code in this repo. Ervin owns the AWS account and provisions resources manually. `bin/deploy.sh` is committed but **not** executed from this repo until Ervin confirms infrastructure is in place and sets the required env vars.
 
@@ -12,9 +12,9 @@
 ## Target topology
 
 ```
-  visitor → friboard.com (Route 53 ALIAS)
+  visitor → abenerp.com (Route 53 ALIAS)
                        → CloudFront distribution (global edge, ACM cert in us-east-1)
-                       → S3 bucket  s3://friboard-com-www  (eu-central-1, Frankfurt)
+                       → S3 bucket  s3://abenerp-com-www  (eu-central-1, Frankfurt)
                           via Origin Access Control (OAC)
 ```
 
@@ -55,7 +55,7 @@ Region: `eu-central-1` (Frankfurt — closest EU GDPR-resident region with full 
 
 ```sh
 aws s3api create-bucket \
-  --bucket friboard-com-www \
+  --bucket abenerp-com-www \
   --region eu-central-1 \
   --create-bucket-configuration LocationConstraint=eu-central-1
 ```
@@ -75,13 +75,13 @@ CloudFront only accepts certs in `us-east-1` (N. Virginia). The cert is metadata
 In ACM console (`us-east-1`):
 
 - Request a public certificate.
-- Domain names: `friboard.com` and `www.friboard.com`.
+- Domain names: `abenerp.com` and `www.abenerp.com`.
 - Validation method: **DNS** (Route 53 — ACM offers a one-click "Create record in Route 53" button once the hosted zone exists).
 
 ### 3. CloudFront distribution
 
 - **Origin:**
-  - Origin domain: `friboard-com-www.s3.eu-central-1.amazonaws.com` (the regional S3 REST endpoint, **not** the legacy website endpoint).
+  - Origin domain: `abenerp-com-www.s3.eu-central-1.amazonaws.com` (the regional S3 REST endpoint, **not** the legacy website endpoint).
   - Origin access: **Origin Access Control (OAC)** — AWS 2024+ best practice. Create a new OAC with signing behaviour "Sign requests (recommended)" and origin type S3.
   - When you save, CloudFront shows a banner with the bucket-policy snippet to paste into the S3 bucket policy. Do that — it grants `s3:GetObject` to the distribution's principal only.
 - **Default cache behavior:**
@@ -103,7 +103,7 @@ In ACM console (`us-east-1`):
   - 404 → `/index.html`, response code 404, error caching min TTL 0. _(Pragmatic placeholder until we ship a dedicated 404 page.)_
 - **Settings:**
   - Price class: "Use only North America and Europe" (PriceClass_100) — visitor base is EU-first, cheap.
-  - Alternate domain names (CNAMEs): `friboard.com`, `www.friboard.com`.
+  - Alternate domain names (CNAMEs): `abenerp.com`, `www.abenerp.com`.
   - SSL certificate: the ACM cert created in step 2.
   - Security policy: **TLSv1.2_2021**.
   - Supported HTTP versions: **HTTP/2 and HTTP/3** both enabled.
@@ -112,13 +112,13 @@ In ACM console (`us-east-1`):
 
 ### 4. Route 53
 
-In the `friboard.com` hosted zone:
+In the `abenerp.com` hosted zone:
 
-- `A` ALIAS at apex (`friboard.com`) → the CloudFront distribution.
+- `A` ALIAS at apex (`abenerp.com`) → the CloudFront distribution.
 - `AAAA` ALIAS at apex → the CloudFront distribution (IPv6).
-- For `www.friboard.com`, the cleanest option is:
-  - Create a second small CloudFront distribution OR an S3 redirect bucket that returns `301 → https://friboard.com/`.
-  - Point `www.friboard.com` `A`/`AAAA` ALIAS at that. This keeps the primary distribution single-host.
+- For `www.abenerp.com`, the cleanest option is:
+  - Create a second small CloudFront distribution OR an S3 redirect bucket that returns `301 → https://abenerp.com/`.
+  - Point `www.abenerp.com` `A`/`AAAA` ALIAS at that. This keeps the primary distribution single-host.
   - Cheaper alternative for Phase 1: register both names on the main CloudFront distribution and accept that `www.` resolves to the same content. Re-evaluate during Phase 2 SEO pass.
 
 ---
@@ -318,7 +318,7 @@ Pick the second option unless there's a specific reason not to. The container se
 
 ```sh
 # Run from the Lightsail host on a cron (every 15 minutes is fine for this volume).
-aws s3 sync /var/aberp/quotes "s3://friboard-com-quotes-backup" \
+aws s3 sync /var/aberp/quotes "s3://abenerp-com-quotes-backup" \
   --storage-class STANDARD_IA \
   --exact-timestamps
 ```

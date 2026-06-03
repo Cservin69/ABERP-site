@@ -11,8 +11,8 @@ You need (substitute throughout):
 | Placeholder       | Where it comes from                                                                             |
 | ----------------- | ----------------------------------------------------------------------------------------------- |
 | `ACCOUNT_ID`      | AWS account number (`aws sts get-caller-identity --query Account`)                              |
-| `BUCKET_STATIC`   | The S3 bucket that holds friboard.com's static surface AND the `_deploy/` staging prefix        |
-| `DISTRIBUTION_ID` | The CloudFront distribution ID serving friboard.com                                             |
+| `BUCKET_STATIC`   | The S3 bucket that holds abenerp.com's static surface AND the `_deploy/` staging prefix         |
+| `DISTRIBUTION_ID` | The CloudFront distribution ID serving abenerp.com                                              |
 | `INSTANCE_ID`     | The SSM-registered instance ID for the Lightsail box (starts with `mi-` for hybrid activations) |
 
 GitHub repo: `Cservin69/ABERP-site` (replace if your fork is elsewhere).

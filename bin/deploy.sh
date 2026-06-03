@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Deploy friboard.com to AWS S3 + CloudFront.
+# Deploy abenerp.com to AWS S3 + CloudFront.
 # See docs/deploy.md for the full runbook and topology.
 #
 # Required environment variables:
-#   ABERP_SITE_BUCKET  S3 bucket name (e.g. friboard-com-www)
+#   ABERP_SITE_BUCKET  S3 bucket name (e.g. abenerp-com-www)
 #   ABERP_SITE_DIST    CloudFront distribution ID
 #
 # Optional:

@@ -3,7 +3,7 @@
 Please don't open a public GitHub issue for anything you believe is a security
 vulnerability. Email the report instead:
 
-- **hello@friboard.com** — primary
+- **contact@abenerp.com** — primary
 
 Include enough detail to reproduce: URL, request headers, body, the observed
 response, and what you'd have expected. A proof-of-concept (curl command,
@@ -11,7 +11,7 @@ screenshot, brief write-up) speeds triage a lot.
 
 ## What we treat as in-scope
 
-- Anything on **friboard.com** (the live site, including the `/quote` flow,
+- Anything on **abenerp.com** (the live site, including the `/quote` flow,
   the `/api/*` endpoints, the `/admin/*` operator UI).
 - Source code in this repo.
 

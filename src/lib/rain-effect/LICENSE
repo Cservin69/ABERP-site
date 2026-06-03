@@ -13,7 +13,7 @@ Original license, from the Codrops repository README:
 
     Full Codrops license terms: http://tympanus.net/codrops/licensing/
 
-This project (ABERP-site / Friboard) integrates the effect into a SvelteKit
+This project (ABERP-site / ABENERP) integrates the effect into a SvelteKit
 landing page. The original source has been adapted to:
 
   - run as ES2015 modules (no Browserify/Gulp bundle)

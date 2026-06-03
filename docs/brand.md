@@ -1,4 +1,4 @@
-# Brand assets — friboard.com
+# Brand assets — abenerp.com
 
 This is a living index of where each brand asset lives in the repo and what Ervin should swap in when his finals are ready.
 
@@ -37,10 +37,10 @@ Weight 200–300 across wordmark / tagline / CTA for the minimalist editorial fe
 
 ## Swap-in checklist for Ervin's finals
 
-1. **Wordmark** — edit `src/lib/brand/Wordmark.svelte`. The `<text>` element can be replaced with `<path>` data exported from the final design. Keep the `<linearGradient id="friboard-gold">` block or replace with a solid fill — both work.
+1. **Wordmark** — edit `src/lib/brand/Wordmark.svelte`. The `<text>` element can be replaced with `<path>` data exported from the final design. Keep the `<linearGradient id="abenerp-gold">` block or replace with a solid fill — both work.
 2. **Favicon** — drop the new mark into `static/favicon.svg`, then regenerate the PNG fallbacks (commands above). Keep the file paths the same so `src/app.html` doesn't need to change.
 3. **Hero background** — vendor the Áben workshop render at `src/lib/rain-effect/assets/texture-rain-bg.png` (same name as the codrops placeholder). The WebGL rain pipeline picks it up automatically; no code change needed.
 
 ## Áben Group umbrella (future)
 
-Friboard is the customer-facing brand. The umbrella is Áben Group — Ervin to decide later whether the landing exposes that relationship (e.g. small "an Áben Group company" footer mark) or keeps Friboard standalone. No asset commitment in this phase.
+ABENERP is the customer-facing brand. The umbrella is Áben Group — Ervin to decide later whether the landing exposes that relationship (e.g. small "an Áben Group company" footer mark) or keeps ABENERP standalone. No asset commitment in this phase.

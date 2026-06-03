@@ -200,8 +200,8 @@ action.
 
 - **Browser CSRF path is closed** by SvelteKit's `csrf.checkOrigin` (default
   `true`) — cross-origin form POSTs are blocked.
-- **Direct attack path is open:** `curl -X POST -H 'Origin: https://friboard.com'
-https://friboard.com/admin/quotes/<known-uuid>?/status -d 'status=rejected'`
+- **Direct attack path is open:** `curl -X POST -H 'Origin: https://abenerp.com'
+https://abenerp.com/admin/quotes/<known-uuid>?/status -d 'status=rejected'`
   succeeds. The attacker needs a UUID; UUID v4 is 128-bit random and not
   enumerable, but UUIDs leak (email, error pages, browser history).
 
@@ -288,7 +288,7 @@ upload step. Defer.
 
 ## 5. Prioritized hardening backlog
 
-### 🟥 Block AWS deploy — must do before pushing to friboard.com
+### 🟥 Block AWS deploy — must do before pushing to abenerp.com
 
 | #   | Action                                                                                                                                                                                                                                                                | Threat                                                                            | Effort | Scope                                                                                  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | ------ | -------------------------------------------------------------------------------------- |
@@ -315,7 +315,7 @@ upload step. Defer.
 | 11  | Magic-byte sniff on uploaded CAD files (cheap allowlist for ISO/STEP, STL ASCII/binary, DXF prefix). Reject mismatched ext+magic.                                                            | Disguised payloads; doesn't actually execute but hardens against future automation. | M      | Code (`/api/quote`).                      |
 | 12  | Replace cookie-value-is-the-secret with an opaque session-id pattern. Store sessions in `data/sessions/<id>.json` (single-operator: a single file is fine). Cookie holds the random id only. | Cookie theft = secret theft. Forward-compat for multi-operator.                     | M      | Code (`auth.ts`).                         |
 | 13  | Append-only `audit.jsonl` per quote (in addition to in-place `status_history`). One line per state transition.                                                                               | Tamper-evident audit trail.                                                         | M      | Code (`quote-store.ts`).                  |
-| 14  | `SECURITY.md` at repo root with a `hello@friboard.com` contact and disclosure-window expectations.                                                                                           | Responsible-disclosure on-ramp.                                                     | S      | Docs.                                     |
+| 14  | `SECURITY.md` at repo root with a `contact@abenerp.com` contact and disclosure-window expectations.                                                                                          | Responsible-disclosure on-ramp.                                                     | S      | Docs.                                     |
 | 15  | Wire CloudWatch Logs ingestion for `/home/aberp/logs/aberp-site.{log,err}`; redact `email` / `filename` fields before they're shipped; document the new processor in `docs/privacy.md`.      | Operational visibility without leaking PII to a US-region log bucket.               | M      | Lightsail-side (CloudWatch agent) + docs. |
 | 16  | Add `BODY_SIZE_LIMIT`/`SHUTDOWN_TIMEOUT`/`IDLE_TIMEOUT` tuning to the env template with reasoning comments. (Currently they all run on adapter-node defaults.)                               | Slow-loris-style upload starvation, hung connections.                               | S      | Docs.                                     |
 
