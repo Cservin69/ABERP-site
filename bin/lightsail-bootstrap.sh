@@ -165,7 +165,11 @@ CLOUDFRONT_SHARED_SECRET=
 NODE_ENV=production
 HOST=127.0.0.1
 PORT=3000
-ORIGIN=https://friboard.com
+# MUST match the public domain the browser sends as its Origin header. SvelteKit's
+# csrf.checkOrigin (default on) compares this to the request Origin and 403s every
+# multipart/form-data POST (the /quote form) on mismatch. A stale value here is the
+# classic "form submits but gets a 403/Network error" failure after a domain change.
+ORIGIN=https://abenerp.com
 ABERP_SITE_QUOTE_DIR=/home/aberp/data/quotes
 # Cap matching the in-handler MAX_TOTAL_BYTES in src/routes/api/quote/+server.ts.
 # adapter-node defaults to 512 KB which silently 413s every CAD upload.

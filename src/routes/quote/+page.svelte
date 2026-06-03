@@ -128,7 +128,20 @@
 				</p>
 			</section>
 		{:else}
-			<form class="quote-form" onsubmit={onSubmit} novalidate>
+			<!-- Progressive enhancement: when JS hydrates, onSubmit calls
+			     preventDefault() and submits via fetch() (the nice in-page UX).
+			     If hydration fails, the native submit must still reach the API —
+			     so the form declares method/action/enctype and every field carries
+			     a `name`. Without these a non-hydrated submit would default to
+			     GET /quote (the source of the live "POSTs to /" class of bug). -->
+			<form
+				class="quote-form"
+				method="POST"
+				action="/api/quote"
+				enctype="multipart/form-data"
+				onsubmit={onSubmit}
+				novalidate
+			>
 				<!-- Honeypot. Real users never see or focus this; bots that auto-fill
 				     every input populate it and the server silently 200-OKs without
 				     persisting anything. Server-validated in /api/quote. -->
@@ -147,6 +160,7 @@
 					<label for="name">Your name <span class="req" aria-hidden="true">*</span></label>
 					<input
 						id="name"
+						name="name"
 						type="text"
 						required
 						autocomplete="name"
@@ -159,6 +173,7 @@
 					<label for="email">Email <span class="req" aria-hidden="true">*</span></label>
 					<input
 						id="email"
+						name="email"
 						type="email"
 						required
 						autocomplete="email"
@@ -169,7 +184,13 @@
 
 				<div class="field">
 					<label for="company">Company <span class="opt">(optional)</span></label>
-					<input id="company" type="text" autocomplete="organization" bind:value={company} />
+					<input
+						id="company"
+						name="company"
+						type="text"
+						autocomplete="organization"
+						bind:value={company}
+					/>
 				</div>
 
 				<div class="field">
@@ -182,6 +203,7 @@
 					</label>
 					<input
 						id="files"
+						name="files"
 						type="file"
 						multiple
 						accept={ACCEPT_EXT}
@@ -218,7 +240,7 @@
 				<div class="row">
 					<div class="field">
 						<label for="material">Material <span class="opt">(optional)</span></label>
-						<select id="material" bind:value={material}>
+						<select id="material" name="material" bind:value={material}>
 							<option value="unknown">Not sure / ask us</option>
 							<option value="aluminum">Aluminum</option>
 							<option value="steel">Steel</option>
@@ -233,6 +255,7 @@
 						<label for="quantity">Quantity <span class="opt">(optional)</span></label>
 						<input
 							id="quantity"
+							name="quantity"
 							type="number"
 							min="1"
 							step="1"
@@ -243,7 +266,7 @@
 
 					<div class="field">
 						<label for="deadline">Needed by <span class="opt">(optional)</span></label>
-						<input id="deadline" type="date" bind:value={deadline} />
+						<input id="deadline" name="deadline" type="date" bind:value={deadline} />
 					</div>
 				</div>
 
@@ -251,13 +274,14 @@
 					<label for="notes">
 						Notes <span class="opt">(optional, max {NOTES_MAX} chars)</span>
 					</label>
-					<textarea id="notes" rows="4" maxlength={NOTES_MAX} bind:value={notes}></textarea>
+					<textarea id="notes" name="notes" rows="4" maxlength={NOTES_MAX} bind:value={notes}
+					></textarea>
 					<p class="counter">{notes.length} / {NOTES_MAX}</p>
 				</div>
 
 				<div class="field consent">
 					<label>
-						<input type="checkbox" bind:checked={consent} required />
+						<input type="checkbox" name="consent" value="true" bind:checked={consent} required />
 						I agree my data is processed only to respond to this quote, per the
 						<a href={resolve('/privacy')} target="_blank" rel="noopener">Privacy Policy</a>.
 						<span class="req" aria-hidden="true">*</span>
