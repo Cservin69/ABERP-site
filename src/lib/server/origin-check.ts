@@ -18,8 +18,10 @@ import { publicSiteUrl } from './public-url';
  *      expected, got }` — instead of SvelteKit's terse text response, so the
  *      `/api/quote` JSON contract (the form's fetch() reads .json()) and
  *      operator debugging both have something machine-readable to act on.
- *   3. In production the allowlist is exactly `publicSiteUrl()`. In dev the
- *      common local origins (`http://localhost:5173`, `http://127.0.0.1:5173`,
+ *   3. In production the allowlist is `publicSiteUrl()` plus its `www.`-vs-
+ *      apex sibling — CloudFront serves both hostnames without redirecting
+ *      between them, so customers can land on either. In dev the common local
+ *      origins (`http://localhost:5173`, `http://127.0.0.1:5173`,
  *      `http://localhost:4173` for vite preview, plus their non-port variants)
  *      are also accepted so `vite dev` keeps working without per-developer env
  *      twiddling. The dev-only branch is gated on SvelteKit's `dev` flag,
@@ -49,6 +51,24 @@ export interface OriginCheck {
 }
 
 /**
+ * Return both the apex and `www.` variants of an origin URL so a customer
+ * who lands on either hostname (no CloudFront redirect between the two is
+ * configured today) passes the allowlist. Falls back to the input unchanged
+ * if the URL doesn't parse — `publicSiteUrl()` is already validated upstream,
+ * so this is defence-in-depth.
+ */
+function originVariants(url: string): string[] {
+	try {
+		const u = new URL(url);
+		const host = u.host;
+		const sibling = host.startsWith('www.') ? host.slice(4) : `www.${host}`;
+		return [`${u.protocol}//${host}`, `${u.protocol}//${sibling}`];
+	} catch {
+		return [url];
+	}
+}
+
+/**
  * Inspect the request's `Origin` header against the allowlist.
  * Pure: returns the verdict instead of throwing, so callers can choose
  * between a tailored JSON response (API routes) and `error(403, …)`
@@ -56,8 +76,14 @@ export interface OriginCheck {
  */
 export function checkOrigin(request: Request): OriginCheck {
 	const got = request.headers.get('origin');
-	const expectedProd = publicSiteUrl();
-	const expected = dev ? [expectedProd, ...DEV_ALLOWED] : [expectedProd];
+	// PR-S: accept both apex and `www.` variants of the configured public URL.
+	// CloudFront serves /quote on both hostnames with no redirect; previously a
+	// customer on whichever variant was NOT the configured one got a 403 here,
+	// which CloudFront then swapped for an S3 error page, surfacing in the
+	// browser as "Network error" once the form's `await res.json()` threw on
+	// the HTML body. See [[quote-csrf-origin]].
+	const prodVariants = originVariants(publicSiteUrl());
+	const expected = dev ? [...prodVariants, ...DEV_ALLOWED] : prodVariants;
 
 	// No Origin header = not a browser-initiated cross-site POST (per Fetch).
 	// SvelteKit's csrf.checkOrigin handles the browser case before us; an

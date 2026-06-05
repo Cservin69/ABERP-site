@@ -35,14 +35,34 @@ describe('checkOrigin', () => {
 	it('allows a request matching ABERP_SITE_PUBLIC_URL exactly', () => {
 		const verdict = checkOrigin(reqWith('https://abenerp.com'));
 		expect(verdict.ok).toBe(true);
-		expect(verdict.expected).toEqual(['https://abenerp.com']);
+		expect(verdict.expected).toEqual(['https://abenerp.com', 'https://www.abenerp.com']);
+	});
+
+	it('allows the www variant when the configured URL is apex (PR-S regression: customers on www.abenerp.com hit the catch block previously)', () => {
+		const verdict = checkOrigin(reqWith('https://www.abenerp.com'));
+		expect(verdict.ok).toBe(true);
+		expect(verdict.expected).toEqual(['https://abenerp.com', 'https://www.abenerp.com']);
+	});
+
+	it('allows the apex variant when the configured URL is www', () => {
+		envState.ABERP_SITE_PUBLIC_URL = 'https://www.abenerp.com';
+		const verdict = checkOrigin(reqWith('https://abenerp.com'));
+		expect(verdict.ok).toBe(true);
+		expect(verdict.expected).toEqual(['https://www.abenerp.com', 'https://abenerp.com']);
 	});
 
 	it('rejects a request from a different host in production', () => {
 		const verdict = checkOrigin(reqWith('https://evil.example.com'));
 		expect(verdict.ok).toBe(false);
-		expect(verdict.expected).toEqual(['https://abenerp.com']);
+		expect(verdict.expected).toEqual(['https://abenerp.com', 'https://www.abenerp.com']);
 		expect(verdict.got).toBe('https://evil.example.com');
+	});
+
+	it('rejects a sibling that only shares the apex tail (sanity: www-prefix matching is not substring matching)', () => {
+		// `evil-abenerp.com` ends in `abenerp.com` but is a different registrable
+		// domain; the allowlist must not accept it just because the suffix matches.
+		expect(checkOrigin(reqWith('https://evil-abenerp.com')).ok).toBe(false);
+		expect(checkOrigin(reqWith('https://abenerp.com.evil.example')).ok).toBe(false);
 	});
 
 	it('rejects localhost in production (no dev carve-out)', () => {
@@ -94,7 +114,11 @@ describe('assertSameOrigin', () => {
 			got: string;
 		};
 		expect(body.error).toBe('origin_mismatch');
-		expect(body.expected).toEqual(['https://abenerp.com']);
+		expect(body.expected).toEqual(['https://abenerp.com', 'https://www.abenerp.com']);
 		expect(body.got).toBe('https://evil.example.com');
+	});
+
+	it('returns null for the www sibling so the customer-facing /api/quote flow proceeds', () => {
+		expect(assertSameOrigin(reqWith('https://www.abenerp.com'))).toBeNull();
 	});
 });
