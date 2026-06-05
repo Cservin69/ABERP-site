@@ -272,13 +272,14 @@ BODY_SIZE_LIMIT=52428800
 # every previously-issued link becomes invalid.
 #   QUOTE_STATUS_SIGNING_KEY=$(openssl rand -hex 32)
 QUOTE_STATUS_SIGNING_KEY=
-# Public-facing base URL of this deployment (no trailing slash). Single source
-# of truth for: operator + customer transactional emails, dynamic sitemap.xml /
-# robots.txt, canonical + og:url meta, and the Origin allowlist in
-# src/lib/server/origin-check.ts. Defaults to https://abenerp.com in code if
-# unset, but pin it explicitly so staging boxes never email prod URLs.
-# PR-Q consolidated this with the legacy ABERP_SITE_PUBLIC_BASE_URL variant;
-# only this name is honoured now.
+# REQUIRED in production. Public-facing base URL of this deployment (no
+# trailing slash). Single source of truth for: operator + customer
+# transactional emails, dynamic sitemap.xml / robots.txt, canonical +
+# og:url meta, and the Origin allowlist in src/lib/server/origin-check.ts.
+# PR-R makes publicSiteUrl() throw on first call in production when this is
+# unset/blank — a misconfigured box refuses POSTs instead of fail-opening
+# with the prod URL baked into the code. PR-Q consolidated this with the
+# legacy ABERP_SITE_PUBLIC_BASE_URL variant; only this name is honoured now.
 ABERP_SITE_PUBLIC_URL=https://abenerp.com
 
 # --- Transactional email (PR-K) -------------------------------------------
