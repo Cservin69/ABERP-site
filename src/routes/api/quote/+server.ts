@@ -6,6 +6,7 @@ import { resolve as pathResolve, join, basename, extname } from 'node:path';
 import type { QuoteMetadata } from '$lib/server/quote-store';
 import { sendQuoteNotifications } from '$lib/server/email';
 import { validateCadFile } from '$lib/server/cad-validate';
+import { assertSameOrigin } from '$lib/server/origin-check';
 
 const QUOTE_DIR = process.env.ABERP_SITE_QUOTE_DIR ?? './data/quotes';
 const MAX_TOTAL_BYTES = 50 * 1024 * 1024;
@@ -62,6 +63,12 @@ function sanitizeFilename(raw: string): string {
 }
 
 export const POST: RequestHandler = async ({ request }) => {
+	// PR-Q layer: explicit Origin allowlist on top of SvelteKit's csrf.checkOrigin.
+	// Returns a structured JSON 403 the form's fetch().json() can parse, instead
+	// of the framework's terse text body. See src/lib/server/origin-check.ts.
+	const originReject = assertSameOrigin(request);
+	if (originReject) return originReject;
+
 	let form: FormData;
 	try {
 		form = await request.formData();

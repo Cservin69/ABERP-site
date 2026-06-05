@@ -2,6 +2,7 @@ import { env } from '$env/dynamic/private';
 import nodemailer, { type Transporter } from 'nodemailer';
 import type { QuoteMetadata } from './quote-store';
 import { signQuoteToken } from './quote-token';
+import { publicSiteUrl } from './public-url';
 
 /**
  * Transactional email for quote notifications. SERVER-ONLY.
@@ -52,10 +53,7 @@ function readConfig(): SmtpConfig | null {
 	// Operator notifications fall back to the From address (self-notify) when no
 	// dedicated inbox is configured.
 	const operator = (env.ABERP_SITE_OPERATOR_EMAIL ?? '').trim() || from;
-	const publicUrl = ((env.ABERP_SITE_PUBLIC_URL ?? '').trim() || 'https://abenerp.com').replace(
-		/\/+$/,
-		''
-	);
+	const publicUrl = publicSiteUrl();
 
 	if (!Number.isFinite(port) || port < 1 || port > 65535) return null;
 
@@ -290,12 +288,8 @@ export async function sendQuoteNotifications(q: QuoteMetadata): Promise<NotifyRe
 // Single source of truth for customer-facing quote URLs and the confirmation
 // subject. The confirmation send path above (sendQuoteNotifications) can import
 // buildQuoteStatusUrl so the signed link is generated in exactly one place.
-const DEFAULT_BASE_URL = 'https://abenerp.com';
-
-function publicBaseUrl(): string {
-	const raw = env.ABERP_SITE_PUBLIC_BASE_URL ?? DEFAULT_BASE_URL;
-	return raw.replace(/\/+$/, '');
-}
+// The host comes from `publicSiteUrl()` — the same env var used by the operator
+// admin-deep-link above (PR-Q reconciled the legacy URL/BASE_URL split).
 
 /**
  * The read-only status page link for a quote, with its signed token attached:
@@ -304,7 +298,7 @@ function publicBaseUrl(): string {
  */
 export function buildQuoteStatusUrl(id: string): string {
 	const token = signQuoteToken(id);
-	return `${publicBaseUrl()}/q/${encodeURIComponent(id)}?t=${token}`;
+	return `${publicSiteUrl()}/q/${encodeURIComponent(id)}?t=${token}`;
 }
 
 /** Subject line for the customer confirmation email — "Ajánlat visszaigazolás <short id>". */

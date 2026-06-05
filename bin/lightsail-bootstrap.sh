@@ -272,14 +272,13 @@ BODY_SIZE_LIMIT=52428800
 # every previously-issued link becomes invalid.
 #   QUOTE_STATUS_SIGNING_KEY=$(openssl rand -hex 32)
 QUOTE_STATUS_SIGNING_KEY=
-# Customer-facing public base URL used to build the status-page link in the
-# confirmation email (no trailing slash). Defaults to https://abenerp.com in
-# code if unset, but pin it explicitly so staging boxes do not email prod URLs.
-ABERP_SITE_PUBLIC_BASE_URL=https://abenerp.com
-# Public site URL used for operator-facing notifications (the new-quote alert
-# email's "view in admin" link). Today this is consumed separately from
-# ABERP_SITE_PUBLIC_BASE_URL above — they should converge into one var in a
-# follow-up; for now set both to the same value to avoid divergence.
+# Public-facing base URL of this deployment (no trailing slash). Single source
+# of truth for: operator + customer transactional emails, dynamic sitemap.xml /
+# robots.txt, canonical + og:url meta, and the Origin allowlist in
+# src/lib/server/origin-check.ts. Defaults to https://abenerp.com in code if
+# unset, but pin it explicitly so staging boxes never email prod URLs.
+# PR-Q consolidated this with the legacy ABERP_SITE_PUBLIC_BASE_URL variant;
+# only this name is honoured now.
 ABERP_SITE_PUBLIC_URL=https://abenerp.com
 
 # --- Transactional email (PR-K) -------------------------------------------

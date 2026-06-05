@@ -8,16 +8,19 @@
 		<meta name="description" content="ABENERP — Your CAD. Your part. Made." />
 		<meta name="author" content="ABENERP" />
 		<meta name="robots" content="index, follow" />
-		<link rel="canonical" href="https://abenerp.com/" />
 
+		<!--
+		  Host-dependent meta (canonical, og:url, og:image, twitter:image) lives in
+		  src/routes/+layout.svelte so it can pull the deploy's public origin from
+		  the ABERP_SITE_PUBLIC_URL env var via the root server load. Host-agnostic
+		  tags stay here in the static template.
+		-->
 		<meta property="og:type" content="website" />
-		<meta property="og:url" content="https://abenerp.com/" />
 		<meta property="og:title" content="ABENERP — Your CAD. Your part. Made." />
 		<meta
 			property="og:description"
 			content="Custom CAM-quoted parts manufactured from your CAD. Upload, quote, manufacture."
 		/>
-		<meta property="og:image" content="https://abenerp.com/og-image.png" />
 		<meta property="og:image:width" content="1200" />
 		<meta property="og:image:height" content="630" />
 		<meta property="og:locale" content="en_US" />
@@ -28,7 +31,6 @@
 			name="twitter:description"
 			content="Custom CAM-quoted parts manufactured from your CAD. Upload, quote, manufacture."
 		/>
-		<meta name="twitter:image" content="https://abenerp.com/og-image.png" />
 
 		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 		<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />

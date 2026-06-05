@@ -2,6 +2,7 @@ import { error, fail, redirect } from '@sveltejs/kit';
 import { stat } from 'node:fs/promises';
 import type { Actions, PageServerLoad } from './$types';
 import { requireAdminCookieOrError } from '$lib/server/auth';
+import { checkOrigin } from '$lib/server/origin-check';
 import { quoteFilePath, readQuote, writeQuoteAtomic } from '$lib/server/quote-store';
 import { QUOTE_STATUSES, isQuoteStatus } from '$lib/server/quote-status';
 
@@ -46,6 +47,20 @@ export const load: PageServerLoad = async ({ params }) => {
 
 export const actions: Actions = {
 	status: async ({ params, request, cookies }) => {
+		// PR-Q: explicit Origin allowlist on top of SvelteKit's csrf.checkOrigin.
+		// Layered before the cookie check so a cross-origin direct POST that
+		// happens to carry a stale admin cookie still fails closed at the
+		// transport edge. `checkOrigin` returns a verdict so form actions can
+		// surface it through fail() instead of crafting an arbitrary Response.
+		const origin = checkOrigin(request);
+		if (!origin.ok) {
+			return fail(403, {
+				error: 'origin_mismatch',
+				expected: origin.expected,
+				got: origin.got
+			});
+		}
+
 		requireAdminCookieOrError(cookies);
 		const id = params.id ?? '';
 		if (!UUID_RE.test(id)) return fail(400, { error: 'Invalid id.' });

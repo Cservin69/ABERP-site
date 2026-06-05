@@ -9,7 +9,7 @@ const { envState } = vi.hoisted(() => ({
 		QUOTE_STATUS_SIGNING_KEY: 'unit-test-signing-key-0123456789abcdef'
 	} as {
 		QUOTE_STATUS_SIGNING_KEY?: string;
-		ABERP_SITE_PUBLIC_BASE_URL?: string;
+		ABERP_SITE_PUBLIC_URL?: string;
 	}
 }));
 
@@ -27,11 +27,11 @@ import { verifyQuoteToken } from './quote-token';
 describe('email URL + subject builders', () => {
 	beforeEach(() => {
 		envState.QUOTE_STATUS_SIGNING_KEY = KEY;
-		delete envState.ABERP_SITE_PUBLIC_BASE_URL;
+		delete envState.ABERP_SITE_PUBLIC_URL;
 	});
 	afterEach(() => {
 		envState.QUOTE_STATUS_SIGNING_KEY = KEY;
-		delete envState.ABERP_SITE_PUBLIC_BASE_URL;
+		delete envState.ABERP_SITE_PUBLIC_URL;
 	});
 
 	it('builds the default-host status URL with a token that verifies', () => {
@@ -41,8 +41,8 @@ describe('email URL + subject builders', () => {
 		expect(verifyQuoteToken(ID, token)).toBe(true);
 	});
 
-	it('honours ABERP_SITE_PUBLIC_BASE_URL and strips trailing slashes', () => {
-		envState.ABERP_SITE_PUBLIC_BASE_URL = 'https://staging.abenerp.com///';
+	it('honours ABERP_SITE_PUBLIC_URL and strips trailing slashes', () => {
+		envState.ABERP_SITE_PUBLIC_URL = 'https://staging.abenerp.com///';
 		const url = buildQuoteStatusUrl(ID);
 		expect(url.startsWith(`https://staging.abenerp.com/q/${ID}?t=`)).toBe(true);
 		expect(url).not.toContain('.com//q');
