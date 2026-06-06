@@ -4,6 +4,8 @@
 **Design doc:** [`docs/design/storefront-auto-quote-pipeline.md`](../design/storefront-auto-quote-pipeline.md) §2.
 **Companion (ABERP-side):** `ABERP/docs/design/auto-quoting-ground-zero.md` §14-D.
 
+> **Scope framing.** This ADR describes an **additive extension** to the live ABERP-site repo. The existing `/quote` form, `/api/quote` endpoint, intake-poll surface, CloudFront/Lightsail pipeline, and admin UI remain unchanged. Concretely on the storefront side, items tagged "today's path, unchanged" below are exactly that — already-shipping code we read from, not rebuild.
+
 ## Context
 
 ABERP closed S266–S275 at `PROD_v2.26.1`, shipping the full producer-side auto-quoting pipeline: pure-Rust scoring engine (`crates/aberp-quote-engine`), Python CAD extractor with its Rust wrapper (`crates/aberp-cad-extract-wrapper` + `python/aberp-cad-extract`), DuckDB-backed catalogue (`quoting_materials` + 7 other tables), DEAL saga (ADR-0067 ABERP-side), material reservations (ADR-0069 ABERP-side), `stock_alert` sticky-flag enforcement, and the audit ledger entries for the whole flow.

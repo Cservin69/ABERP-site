@@ -13,6 +13,12 @@
 
 **Sibling doc (the producer side):** [`ABERP/docs/design/auto-quoting-ground-zero.md`](../../../ABERP/docs/design/auto-quoting-ground-zero.md). The ABERP-side design closed S266–S275 at `PROD_v2.26.1` (DEAL saga, sticky `stock_alert`, material commit + sweep). This doc is the **storefront-side counterpart** — what the customer-facing layer has to be so the ABERP polling daemon and outbound push can drive end-to-end auto-quoting.
 
+> **Scope framing — additive extension, not a rebuild.**
+>
+> This document designs the auto-quote pipeline as an **additive extension** to the live ABERP-site repo at [`https://github.com/Cservin69/ABERP-site.git`](https://github.com/Cservin69/ABERP-site.git). The existing `/quote` submission form, `/api/quote` endpoint, CloudFront / Lightsail deployment pipeline, GitHub Actions workflows, S3 static surface, admin UI, intake-poll surface, HMAC status link (PR-L), local SMTP send (PR-K), Origin allowlist (PR-Q/R/S), CloudFront `/api/*` error pass-through (PR-T), and `quote_intake` writeback contract (S256 ABERP-side) **all remain unchanged** — we BUILD ON them. PR-02 through PR-05 add new endpoints, new metadata fields, new token shapes, and new email messages alongside what is already live; no existing route is replaced, no existing surface is rebuilt, no existing deploy mechanism is touched.
+>
+> When this doc says "extend," "widen," "alongside," or "fall back to existing" — that is the design intent. Where it names a surface as "the existing X" or "today's X," that surface ships in production at base commit `291d900` and continues to ship through this batch.
+
 This doc ships zero product code. The deliverables PR-02 through PR-05 (roughly four storefront sessions) implement against it. Every default chosen here is reversible by Ervin with a sentence; where a choice is non-obvious, it is flagged inline with the reasoning rather than asked as a blocking question (per `[[no-ask-user-question]]`).
 
 It is written **adversarially against the originating brief** per `[[pushback-as-method]]`. Two of the brief's premises do not survive contact with the committed ABERP-side architecture (§14-D of the ABERP doc) and one storefront-side runtime fact (PR-K landed local SMTP, S232 era); those are corrected in §9 and §12 with the better path.
@@ -420,7 +426,7 @@ A second endpoint `GET /api/catalogue/materials` (public, no auth) that returns 
 }
 ```
 
-The `/quote` page's material dropdown (`src/routes/quote/+page.svelte:279`) replaces its hard-coded `<option>` list with a fetch of `/api/catalogue/materials` at hydration time. Fallback when the catalogue is empty (first boot, ABERP never connected yet): show the existing six-option hard-coded list (today's behavior preserved, with a small "list may be limited until our shop sync runs" note). Per `[[trust-code-not-operator]]`, never leave the form unusable because the catalogue cache is cold.
+The `/quote` page's material dropdown (`src/routes/quote/+page.svelte:279`) **adds** a hydration-time fetch of `/api/catalogue/materials` and renders the grade list when it arrives. The existing six-option hard-coded `<option>` list is **preserved as the fallback** for first boot (ABERP never connected yet) and for graceful degradation when the catalogue cache is unreadable — with a small "list may be limited until our shop sync runs" note. The existing markup is widened, not replaced; today's customer-facing behavior is the floor, not the ceiling. Per `[[trust-code-not-operator]]`, the form is never unusable because the catalogue cache is cold.
 
 **The form submits `grade` not `material_preference`** going forward. The existing closed enum `ALLOWED_MATERIALS` in `/api/quote/+server.ts` widens to "accept either a legacy preference (aluminum/steel/...) OR a grade from the current catalogue snapshot." Backwards-compat for any in-flight pre-S276 customer who left a tab open.
 

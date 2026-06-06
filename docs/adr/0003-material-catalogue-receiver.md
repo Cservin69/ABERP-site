@@ -49,9 +49,9 @@ Two new endpoints land in PR-02:
 
 ### Storefront `/quote` form changes
 
-- The dropdown fetches `/api/catalogue/materials` at hydration time, replaces its hard-coded `<option>` list with the grade list.
+- The dropdown **adds** a fetch of `/api/catalogue/materials` at hydration time and renders the grade list when the cache is populated. The hard-coded `<option>` list is **preserved as the fallback** (see next bullet), so the existing markup is widened, not replaced.
 - **Fallback when the catalogue is empty** (first boot, ABERP never connected yet): show the existing six-option hard-coded list with a small note. The form must never become unusable because the catalogue cache is cold (`[[trust-code-not-operator]]`).
-- The form posts `material=<grade>` going forward. The existing `ALLOWED_MATERIALS` Set in `/api/quote/+server.ts` is **widened** to accept either a legacy preference (`aluminum`/`steel`/...) OR a grade that exists in the current catalogue snapshot. Backwards-compat for any pre-PR-02 customer with a stale tab open.
+- The form posts `material=<grade>` once the catalogue is populated. The existing `ALLOWED_MATERIALS` Set in `/api/quote/+server.ts` is **widened** to accept either a legacy preference (`aluminum`/`steel`/...) OR a grade that exists in the current catalogue snapshot. The legacy values stay valid forever — no breaking change to any pre-PR-02 customer with a stale tab open.
 
 ## Alternatives considered
 
