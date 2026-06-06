@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { resolve } from '$app/paths';
 	import Wordmark from '$lib/brand/Wordmark.svelte';
 
@@ -7,10 +8,37 @@
 	const MAX_TOTAL_BYTES = 50 * 1024 * 1024;
 	const NOTES_MAX = 2000;
 
+	type CatalogueMaterial = {
+		grade: string;
+		display_name: string;
+		stock_status: string;
+		lead_time_default_days: number;
+	};
+
 	let name = $state('');
 	let email = $state('');
 	let company = $state('');
 	let material = $state('unknown');
+	// Populated at hydration via /api/catalogue/materials. Empty array =
+	// catalogue cache cold OR fetch failed; the hard-coded fallback list stays
+	// visible so the form never becomes unusable ([[trust-code-not-operator]]).
+	let catalogueMaterials = $state<CatalogueMaterial[]>([]);
+	let catalogueLoaded = $state(false);
+
+	onMount(async () => {
+		try {
+			const res = await fetch('/api/catalogue/materials');
+			if (!res.ok) return;
+			const data = (await res.json()) as { materials?: CatalogueMaterial[] };
+			if (Array.isArray(data.materials)) {
+				catalogueMaterials = data.materials;
+			}
+		} catch {
+			// Silent — fallback list stays rendered.
+		} finally {
+			catalogueLoaded = true;
+		}
+	});
 	let quantity = $state<number | null>(null);
 	let deadline = $state('');
 	let notes = $state('');
@@ -278,13 +306,25 @@
 						<label for="material">Material <span class="opt">(optional)</span></label>
 						<select id="material" name="material" bind:value={material}>
 							<option value="unknown">Not sure / ask us</option>
-							<option value="aluminum">Aluminum</option>
-							<option value="steel">Steel</option>
-							<option value="stainless">Stainless steel</option>
-							<option value="brass">Brass</option>
-							<option value="plastic">Plastic</option>
+							{#if catalogueMaterials.length > 0}
+								{#each catalogueMaterials as m (m.grade)}
+									<option value={m.grade}>{m.display_name}</option>
+								{/each}
+							{:else}
+								<option value="aluminum">Aluminum</option>
+								<option value="steel">Steel</option>
+								<option value="stainless">Stainless steel</option>
+								<option value="brass">Brass</option>
+								<option value="plastic">Plastic</option>
+							{/if}
 							<option value="other">Other (note below)</option>
 						</select>
+						{#if catalogueLoaded && catalogueMaterials.length === 0}
+							<p class="catalogue-note">
+								List may be limited until our shop sync runs — pick the closest match or
+								&ldquo;Other&rdquo; and note specifics below.
+							</p>
+						{/if}
 					</div>
 
 					<div class="field">
@@ -589,6 +629,13 @@
 		text-align: right;
 		font-size: 0.75rem;
 		color: rgba(243, 238, 229, 0.5);
+	}
+
+	.catalogue-note {
+		margin: 0.35rem 0 0;
+		font-size: 0.75rem;
+		font-weight: 300;
+		color: rgba(243, 238, 229, 0.55);
 	}
 
 	.consent label {

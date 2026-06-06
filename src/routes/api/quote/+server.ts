@@ -7,6 +7,7 @@ import type { QuoteMetadata } from '$lib/server/quote-store';
 import { sendQuoteNotifications } from '$lib/server/email';
 import { validateCadFile } from '$lib/server/cad-validate';
 import { assertSameOrigin } from '$lib/server/origin-check';
+import { currentCatalogueGrades } from '$lib/server/catalogue-store';
 
 const QUOTE_DIR = process.env.ABERP_SITE_QUOTE_DIR ?? './data/quotes';
 const MAX_TOTAL_BYTES = 50 * 1024 * 1024;
@@ -29,7 +30,10 @@ const ALLOWED_EXT = new Set([
 	'.3mf',
 	'.obj'
 ]);
-const ALLOWED_MATERIALS = new Set([
+// Legacy free-text preferences accepted forever, so any pre-PR-02 tab still
+// submits cleanly (the existing dropdown emits these values). Per ADR-0003,
+// the catalogue grade set is unioned on top at validation time.
+const LEGACY_MATERIAL_PREFERENCES = new Set([
 	'unknown',
 	'aluminum',
 	'steel',
@@ -121,7 +125,15 @@ export const POST: RequestHandler = async ({ request }) => {
 	}
 
 	if (!EMAIL_RE.test(emailTrim)) return bad('Email is not valid.');
-	if (!ALLOWED_MATERIALS.has(material)) return bad('Invalid material selection.');
+
+	// Material widening (PR-02 / ADR-0003): accept either a legacy preference
+	// (the original closed enum) OR a grade in the current catalogue snapshot.
+	// Grade values follow /^[A-Z][A-Z0-9_]*$/ and never collide with legacy
+	// lowercase values, so the union is unambiguous.
+	if (!LEGACY_MATERIAL_PREFERENCES.has(material)) {
+		const grades = await currentCatalogueGrades();
+		if (!grades.has(material)) return bad('Invalid material selection.');
+	}
 
 	let quantity: number | null = null;
 	if (quantityRaw && quantityRaw.length > 0) {

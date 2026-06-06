@@ -4,6 +4,23 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
+async function writeCatalogue(snapshot: {
+	materials: {
+		grade: string;
+		display_name: string;
+		stock_status: string;
+		lead_time_default_days: number;
+	}[];
+	received_at: string;
+}) {
+	// Dynamic import so the module's `CATALOGUE_DIR = process.env...` is read
+	// AFTER `beforeAll` sets ABERP_SITE_CATALOGUE_DIR. A static top-level
+	// import would capture the default './data/catalogue' (leaks into repo).
+	const mod = await import('$lib/server/catalogue-store');
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal cross-module shape
+	await mod.writeCatalogueAtomic(snapshot as any);
+}
+
 // The handler imports `$lib/server/email`, which in turn imports
 // `$env/dynamic/private` and `nodemailer`. We stub the whole email module so
 // neither tree gets touched — `sendQuoteNotifications` is contractually
@@ -17,10 +34,13 @@ const FIXTURES = resolve(HERE, '..', '..', '..', '..', 'tests', 'fixtures', 'cad
 const read = (name: string): Buffer => readFileSync(resolve(FIXTURES, name));
 
 let TMP_QUOTE_DIR = '';
+let TMP_CATALOGUE_DIR = '';
 
 beforeAll(() => {
 	TMP_QUOTE_DIR = mkdtempSync(resolve(tmpdir(), 'aberp-pr-p-quote-'));
 	process.env.ABERP_SITE_QUOTE_DIR = TMP_QUOTE_DIR;
+	TMP_CATALOGUE_DIR = mkdtempSync(resolve(tmpdir(), 'aberp-pr-02-cat-'));
+	process.env.ABERP_SITE_CATALOGUE_DIR = TMP_CATALOGUE_DIR;
 });
 
 afterEach(() => {
@@ -28,6 +48,11 @@ afterEach(() => {
 	// run starts from a clean slate. We keep the parent tmp dir.
 	try {
 		rmSync(TMP_QUOTE_DIR, { recursive: true, force: true });
+	} catch {
+		/* ignore */
+	}
+	try {
+		rmSync(TMP_CATALOGUE_DIR, { recursive: true, force: true });
 	} catch {
 		/* ignore */
 	}
@@ -125,5 +150,65 @@ describe('/api/quote content-sniffing integration', () => {
 		// still get the flat "File type not allowed" error rather than the
 		// structured invalid_file shape.
 		expect(body.error).toMatch(/not allowed/);
+	});
+
+	it('accepts a catalogue grade when present in the current snapshot (PR-02 widening)', async () => {
+		await writeCatalogue({
+			materials: [
+				{
+					grade: 'AL_6061_T6',
+					display_name: 'Aluminium 6061-T6',
+					stock_status: 'in_stock',
+					lead_time_default_days: 0
+				}
+			],
+			received_at: '2026-06-06T12:00:00Z'
+		});
+		const POST = await importHandler();
+		const form = baseForm();
+		form.set('material', 'AL_6061_T6');
+		form.append('files', fileFromBuffer(read('valid.step'), 'part.step'));
+
+		const req = new Request('http://localhost/api/quote', { method: 'POST', body: form });
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal RequestEvent stub for this handler
+		const res = await POST({ request: req } as any);
+		expect(res.status).toBe(200);
+	});
+
+	it('rejects a grade-shaped value that is NOT in the current catalogue', async () => {
+		await writeCatalogue({
+			materials: [
+				{
+					grade: 'AL_6061_T6',
+					display_name: 'Aluminium 6061-T6',
+					stock_status: 'in_stock',
+					lead_time_default_days: 0
+				}
+			],
+			received_at: '2026-06-06T12:00:00Z'
+		});
+		const POST = await importHandler();
+		const form = baseForm();
+		form.set('material', 'INCONEL_999');
+		form.append('files', fileFromBuffer(read('valid.step'), 'part.step'));
+
+		const req = new Request('http://localhost/api/quote', { method: 'POST', body: form });
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal RequestEvent stub for this handler
+		const res = await POST({ request: req } as any);
+		expect(res.status).toBe(400);
+		const body = (await res.json()) as { error: string };
+		expect(body.error).toMatch(/material/i);
+	});
+
+	it('still accepts legacy preferences even when the catalogue is cold', async () => {
+		const POST = await importHandler();
+		const form = baseForm();
+		form.set('material', 'aluminum');
+		form.append('files', fileFromBuffer(read('valid.step'), 'part.step'));
+
+		const req = new Request('http://localhost/api/quote', { method: 'POST', body: form });
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal RequestEvent stub for this handler
+		const res = await POST({ request: req } as any);
+		expect(res.status).toBe(200);
 	});
 });
