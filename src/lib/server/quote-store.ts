@@ -60,6 +60,18 @@ export interface QuoteMetadata {
 	/** ISO timestamp set once submission notifications have been dispatched. */
 	notified_at?: string;
 	pricing?: QuotePricing;
+	/**
+	 * Customer-acceptance audit (PR-04, ADR-0005). Set exactly once when the
+	 * customer commits the accept POST. `acceptance_signature_ts` records the
+	 * `ts=` query param from the signed accept URL (the expiry stamp baked into
+	 * the HMAC) so we can prove which link was the binding one. `acceptance_audit_id`
+	 * holds ABERP's `email.relayed_storefront` audit id from the confirmation
+	 * email — null when the relay was unconfigured/unavailable at accept time,
+	 * which is logged but does not roll back the state transition.
+	 */
+	accepted_at?: string;
+	acceptance_signature_ts?: string;
+	acceptance_audit_id?: string;
 }
 
 function quoteRoot(): string {

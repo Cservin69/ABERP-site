@@ -8,6 +8,7 @@ import {
 	type QuoteMetadata,
 	type QuotePricing
 } from '$lib/server/quote-store';
+import { sendPricedReadyEmail } from '$lib/server/email';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -215,6 +216,20 @@ export const POST: RequestHandler = async ({ params, request }) => {
 		]
 	};
 	await writeQuoteAtomic(id, updated);
+
+	// Best-effort customer notification — the priced quote is already on disk
+	// and visible at /q/<id>?t=<token>; an email-relay outage must not 500 the
+	// ABERP writeback. See ADR-0007 §"Negative" — the storefront persists the
+	// request (the PDF + metadata) and a future sweep can retry. v1 keeps the
+	// caller flow simple: log on failure, return 200.
+	try {
+		const r = await sendPricedReadyEmail(updated);
+		if (r.status === 'failed') {
+			console.error('[priced] ready-email relay failed:', r.reason);
+		}
+	} catch (err) {
+		console.error('[priced] ready-email threw unexpectedly:', err);
+	}
 
 	return json({ status: 'quoted' });
 };
