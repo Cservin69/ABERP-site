@@ -1,8 +1,13 @@
 # ADR 0008 — Storefront ↔ ABERP network topology in prod
 
-**Status:** Proposed (2026-06-08, S299). Awaiting operator pick on options A/B/C/D — see [Open questions](#open-questions-for-ervins-morning-call). Recommendation: **B (Cloudflare Tunnel)**.
+**Status:** Accepted — **Option B (Cloudflare Tunnel)** (2026-06-08, Ervin's approval; recorded S301). Originally proposed earlier the same day (S299) as recommendation pending operator pick.
 **Related:** [ADR-0004](0004-priced-quote-writeback.md) (priced-quote writeback path), [ADR-0007](0007-storefront-email-relay-via-aberp.md) (email relay path).
 **Walkthrough flag:** [`docs/walkthroughs/end-to-end-auto-quote-test.md`](../walkthroughs/end-to-end-auto-quote-test.md) §"What's NOT in this walkthrough" OQ #3.
+**Runbook:** [`docs/runbooks/cloudflare-tunnel-aberp.md`](../runbooks/cloudflare-tunnel-aberp.md) — step-by-step `cloudflared` bring-up.
+
+## Decision recorded
+
+Ervin approved the S299 recommendation on the night of 2026-06-08: "I always take your recommendation so Option B, no ask you can continue." The remaining four open questions collapse to operator-time configuration choices (Cloudflare account ownership) and one backlog item (`transit_path` audit field) — see [Open questions](#open-questions-resolved-and-residual) below. The bring-up procedure lives in [`docs/runbooks/cloudflare-tunnel-aberp.md`](../runbooks/cloudflare-tunnel-aberp.md). Until that runbook is executed and Lightsail's `ABERP_INTERNAL_BASE_URL` is set, the auto-quote pipeline remains architecturally LIVE but prod-blocked exactly as documented in the S284 walkthrough.
 
 ## Context
 
@@ -33,7 +38,7 @@ This ADR is the decision document for that flag. The pipeline is **architectural
 
 ## Decision
 
-**Recommended pick: Option B (Cloudflare Tunnel).** Justification under [Recommendation](#recommendation-and-pushback). Pending operator selection per [Open questions](#open-questions-for-ervins-morning-call). The other three options are documented below in [Options considered](#options-considered) so the trade space is on the record regardless of which one Ervin picks.
+**Picked: Option B (Cloudflare Tunnel).** Justification under [Recommendation](#recommendation-and-pushback). Approved by Ervin 2026-06-08 (see [Decision recorded](#decision-recorded) above). The other three options remain documented below in [Options considered](#options-considered) so the trade space is on the record and the fallback shapes (especially D) are referenceable if a future audit reopens this.
 
 Whatever option lands, the wire surface from the storefront's perspective is unchanged: the storefront calls `${ABERP_INTERNAL_BASE_URL}/api/...` and the existing bearer-token auth (per ADR-0004 / ADR-0007) gates the call. The four options differ only in **how `ABERP_INTERNAL_BASE_URL` resolves to ABERP's listener** and **what (if anything) terminates TLS in between**.
 
@@ -183,13 +188,13 @@ Per `[[trust-code-not-operator]]`, the validation surface is **a real customer-s
 
 If any of (1)–(3) fail under the chosen topology, the topology pick is wrong-shaped and this ADR should be reopened.
 
-## Open questions (for Ervin's morning call)
+## Open questions (resolved and residual)
 
-1. **Pick A / B / C / D.** This is the load-bearing one. Recommendation is B; C is a close second; D if a security stance demands "no inbound to ABERP"; A only if both B and C are somehow off the table.
-2. **If B: Cloudflare account ownership.** Do we configure the tunnel under the Cloudflare account that owns `abenerp.com` DNS, or stand up a separate Cloudflare account dedicated to the ABERP-side tunnel? Recommendation: same account that owns `abenerp.com`, so the subdomain `aberp.abenerp.com` delegates cleanly via CNAME flattening or NS delegation under the same zone.
-3. **If C: existing Tailscale footprint.** Is Ervin already running Tailscale on the MacBook or on any other personal device? If yes, adoption is near-instant; if no, account setup adds the same ~1h one-time work as B.
-4. **If D: latency tolerance.** Are we OK with quotes taking up to one poll cadence (~60s) longer to surface for the customer? Concretely: customer submits CAD → ABERP prices it → 0–60s wait → priced-ready email goes out. For v1 this is probably fine; worth confirming.
-5. **Audit field `transit_path`** (regardless of pick). Should ADR-0007's `email.relayed_storefront` event grow a `transit_path` enum (`direct` | `cloudflare-tunnel` | `tailscale` | `queue-pull`) so the audit trail records the network path? Small change; recommended yes for compliance auditability.
+1. **Pick A / B / C / D.** **RESOLVED — B (Cloudflare Tunnel)** (Ervin, 2026-06-08; see [Decision recorded](#decision-recorded)).
+2. **If B: Cloudflare account ownership.** **Residual — operator-time decision during runbook execution.** Recommendation stands: configure the tunnel under the Cloudflare account that owns (or will own) `abenerp.com` DNS so the subdomain `aberp.abenerp.com` delegates cleanly via CNAME flattening or NS delegation under the same zone. The runbook's Preflight step prompts the operator to confirm or split. Captured as configuration-choice, not as an open architectural question.
+3. **If C: existing Tailscale footprint.** **N/A** — C was not picked.
+4. **If D: latency tolerance.** **N/A** — D was not picked.
+5. **Audit field `transit_path`.** **Residual — backlog item.** Adding a `transit_path` enum (`direct` | `cloudflare-tunnel` | `tailscale` | `queue-pull`) to ADR-0007's `email.relayed_storefront` audit event is still recommended for compliance auditability. Now that B is picked, the field would always emit `cloudflare-tunnel` for the email-relay leg; the engineering work is small (ADR-0007 ledger schema + emit-site) and lives in a separate session, not this ADR. Tracked in memory as a backlog item alongside this ADR.
 
 ## References
 
