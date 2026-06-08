@@ -70,8 +70,47 @@
 					<dt>Várható válasz / Expected response by</dt>
 					<dd>{formatDate(data.expectedResponseBy)}</dd>
 				{/if}
+				{#if data.quote.pricing}
+					<dt>Érvényes / Valid until</dt>
+					<dd>{data.quote.pricing.valid_until}</dd>
+				{/if}
 			</dl>
 		</section>
+
+		{#if data.quote.pricing?.stock_alert}
+			<section class="block stock-alert" role="alert">
+				<p>
+					<strong>Anyag-készlet változott / Stock status changed</strong> — az árajánlat frissülhet,
+					ha {data.quote.pricing.valid_until} előtt nem fogadod el.
+				</p>
+				<p class="en">
+					Stock status changed since this quote was issued — pricing may be refreshed if not
+					accepted by {data.quote.pricing.valid_until}.
+				</p>
+			</section>
+		{/if}
+
+		{#if data.quote.pricing}
+			<section class="block priced">
+				<h2>Árajánlat PDF / Indicative quote PDF</h2>
+				<p>
+					<a class="pdf-link" href={data.quote.pricing.pdf_url} target="_blank" rel="noopener">
+						Megnyitás / Open quote PDF →
+					</a>
+				</p>
+				<p class="hint">
+					A PDF a megrendelő által megadott e-mailre is el lett küldve. / The PDF was also emailed
+					to the contact address.
+				</p>
+			</section>
+		{:else if data.quote.pricingPending}
+			<section class="block pending">
+				<p>Árazás folyamatban — általában néhány perc, legkésőbb két munkanap.</p>
+				<p class="en">
+					Your quote is being priced — usually within a few minutes, up to two business days.
+				</p>
+			</section>
+		{/if}
 
 		<section class="block history">
 			<h2>Állapotelőzmény / Status timeline</h2>
@@ -313,5 +352,64 @@
 	.chip.status-invoiced {
 		background: rgba(170, 124, 196, 0.18);
 		color: #c9a8e0;
+	}
+
+	.stock-alert {
+		border-color: rgba(232, 188, 90, 0.55);
+		background: rgba(232, 188, 90, 0.08);
+	}
+
+	.stock-alert p {
+		margin: 0 0 0.45rem;
+		font-size: 0.95rem;
+		line-height: 1.5;
+		color: #f0d480;
+	}
+
+	.stock-alert p:last-child {
+		margin-bottom: 0;
+	}
+
+	.stock-alert strong {
+		color: #f6dc9a;
+	}
+
+	.priced .pdf-link {
+		display: inline-block;
+		padding: 0.55rem 0.95rem;
+		border: 1px solid rgba(212, 165, 116, 0.55);
+		border-radius: 2px;
+		color: #f3eee5;
+		text-decoration: none;
+		font-size: 0.95rem;
+		background: rgba(212, 165, 116, 0.1);
+	}
+
+	.priced .pdf-link:hover {
+		background: rgba(212, 165, 116, 0.2);
+		color: #d4a574;
+	}
+
+	.priced p {
+		margin: 0 0 0.6rem;
+		font-size: 0.9rem;
+		line-height: 1.5;
+	}
+
+	.priced .hint {
+		color: rgba(243, 238, 229, 0.6);
+		font-size: 0.82rem;
+		margin-bottom: 0;
+	}
+
+	.pending p {
+		margin: 0 0 0.4rem;
+		font-size: 0.9rem;
+		line-height: 1.5;
+		color: rgba(243, 238, 229, 0.85);
+	}
+
+	.pending p:last-child {
+		margin-bottom: 0;
 	}
 </style>

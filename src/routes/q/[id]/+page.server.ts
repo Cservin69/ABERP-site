@@ -45,6 +45,18 @@ export const load: PageServerLoad = async ({ params, url }) => {
 		toLabel: quoteStatusLabel(h.to)
 	}));
 
+	// Pricing surface — only set when ABERP has written back. The PDF URL re-uses
+	// the same status token so the customer's existing link works for both views.
+	const pricing = quote.pricing
+		? {
+				valid_until: quote.pricing.valid_until,
+				stock_alert: quote.pricing.stock_alert === true,
+				pdf_url: `/api/quotes/${encodeURIComponent(id)}/pdf?t=${encodeURIComponent(token)}`
+			}
+		: null;
+
+	const pricingPending = !pricing && EARLY_STATUSES.has(quote.status);
+
 	// Read-only projection — deliberately omits files, internal request notes, and
 	// any operator-action affordance. Customer sees only what confirms ownership +
 	// progress.
@@ -59,7 +71,9 @@ export const load: PageServerLoad = async ({ params, url }) => {
 				email: quote.contact.email
 			},
 			history,
-			receivedLabel: quoteStatusLabel('received')
+			receivedLabel: quoteStatusLabel('received'),
+			pricing,
+			pricingPending
 		},
 		expectedResponseBy
 	};
