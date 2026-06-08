@@ -332,6 +332,85 @@ describe('POST /api/quotes/{id}/priced — input validation', () => {
 		const res = await POST({ params: { id: QUOTE_ID }, request: req } as any);
 		expect(res.status).toBe(413);
 	});
+
+	it('accepts a 4 MB pdf — exercises the handler well above the adapter-node default 512 KB', async () => {
+		// Regression gate for S285 finding F1. The handler's design cap is 5 MB
+		// (PDF_MAX_BYTES); the adapter-node default is 512 KB. This test calls
+		// the handler directly, so the adapter cap is not exercised — but it
+		// proves the handler itself accepts a body well above the adapter
+		// default. If a future change accidentally lowers the handler's cap
+		// below 4 MB, the priced-writeback contract (ADR-0004, 5 MB PDF design
+		// max) is silently broken; this test catches that.
+		const { POST } = await loadHandler();
+		seedQuote(QUOTE_ID, 'received');
+		const pdfBytes = new ArrayBuffer(4 * 1024 * 1024);
+		const view = new Uint8Array(pdfBytes);
+		view[0] = 0x25;
+		view[1] = 0x50;
+		view[2] = 0x44;
+		view[3] = 0x46;
+		view[4] = 0x2d;
+		const fd = new FormData();
+		fd.set('meta', JSON.stringify(defaultMeta()));
+		fd.set('pdf', new Blob([pdfBytes], { type: 'application/pdf' }), 'quote.pdf');
+		const req = pricedReq(QUOTE_ID, fd);
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
+		const res = await POST({ params: { id: QUOTE_ID }, request: req } as any);
+		expect(res.status).toBe(200);
+		const onDisk = readFileSync(join(TMP_ROOT, QUOTE_ID, 'priced.pdf'));
+		expect(onDisk.length).toBe(4 * 1024 * 1024);
+	});
+
+	it('returns 413 body_truncated_by_proxy_or_adapter on parse failure with a large declared content-length', async () => {
+		// Defense-in-depth diagnostic for S285 F1. When adapter-node, CloudFront,
+		// or nginx truncates a request mid-multipart-stream, the multipart
+		// boundaries no longer close and FormData parsing throws. We can't
+		// rebuild the body from inside the handler, but we can distinguish
+		// "client sent garbage" (small declared length, parse fails — 400)
+		// from "upstream truncation" (large declared length, parse fails — 413
+		// with a hint pointing the operator at BODY_SIZE_LIMIT). Simulate the
+		// truncation by sending a deliberately malformed multipart body whose
+		// declared content-length matches the truncation scenario.
+		const { POST } = await loadHandler();
+		seedQuote(QUOTE_ID, 'received');
+		const malformed = '--boundary-marker\r\nContent-Disposition: form-data; name="pdf"\r\n\r\n';
+		const req = new Request(`http://localhost/api/quotes/${QUOTE_ID}/priced`, {
+			method: 'POST',
+			headers: {
+				authorization: `Bearer ${ADMIN_TOKEN}`,
+				'content-type': 'multipart/form-data; boundary=boundary-marker',
+				'content-length': String(2 * 1024 * 1024)
+			},
+			body: malformed
+		});
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
+		const res = await POST({ params: { id: QUOTE_ID }, request: req } as any);
+		expect(res.status).toBe(413);
+		const body = (await res.json()) as { error: string; hint?: string };
+		expect(body.error).toBe('body_truncated_by_proxy_or_adapter');
+		expect(body.hint).toContain('BODY_SIZE_LIMIT');
+	});
+
+	it('returns plain 400 on parse failure with a small declared content-length (not truncation)', async () => {
+		// Symmetric to the truncation test: a small body that fails to parse
+		// is just client garbage and stays a 400. This keeps the truncation
+		// signal sharp — operators only see the 413+hint when the body was
+		// actually large enough for an upstream cap to be the culprit.
+		const { POST } = await loadHandler();
+		seedQuote(QUOTE_ID, 'received');
+		const req = new Request(`http://localhost/api/quotes/${QUOTE_ID}/priced`, {
+			method: 'POST',
+			headers: {
+				authorization: `Bearer ${ADMIN_TOKEN}`,
+				'content-type': 'multipart/form-data; boundary=nope',
+				'content-length': '64'
+			},
+			body: 'not actually multipart'
+		});
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
+		const res = await POST({ params: { id: QUOTE_ID }, request: req } as any);
+		expect(res.status).toBe(400);
+	});
 });
 
 describe('POST /api/quotes/{id}/priced — happy path + persistence', () => {

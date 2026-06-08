@@ -14,7 +14,7 @@
 
 ## Preflight
 
-Run all four preflight checks before starting Step 1 of the test path. Each verifies one boundary that has to be true for the pipeline to advance.
+Run all five preflight checks before starting Step 1 of the test path. Each verifies one boundary that has to be true for the pipeline to advance.
 
 ### Preflight 1 — ABERP is on PROD_v2.27.2 or later
 
@@ -106,6 +106,44 @@ You should see the empty-state card reading: **"Daemon active, polling every 60s
 - A **RED** card "Daemon failed to start" → click the log link, surface the error in `[[aberp-python-auto-discovery]]` follow-up.
 
 **Why:** the daemon is what pulls newly-submitted quotes from the storefront, runs the CAD extractor, calls the Rust scoring engine, and POSTs the priced artifact back. If it's dormant, nothing on the storefront will advance past `received`.
+
+---
+
+### Preflight 5 — Storefront `BODY_SIZE_LIMIT` is at least 50 MB
+
+**[Browser SSH]** (same SSH session as Preflight 3):
+
+```sh
+sudo journalctl -u aberp-site --since '1 hour ago' | grep -i body_size_limit | tail -3
+```
+
+You should see **no warning lines**, or — on a fresh restart — at most one acknowledging the configured value. If you see:
+
+```
+[aberp-site] BODY_SIZE_LIMIT=(unset, adapter-node default 524288) < 52428800. ...
+```
+
+…the storefront is running with adapter-node's stock 512 KB body cap. Step 3's priced PDF writeback and Step 1's CAD upload will both 413 at the adapter layer before the SvelteKit handlers see them.
+
+**To fix:**
+
+```sh
+sudo grep BODY_SIZE_LIMIT /etc/aberp-site.env
+# should print:  BODY_SIZE_LIMIT=52428800
+# if missing or empty, add the line (a fresh bootstrap via lightsail-bootstrap.sh
+# writes it; older boxes may need a manual edit):
+sudo $EDITOR /etc/aberp-site.env
+sudo systemctl restart aberp-site
+```
+
+`docs/aws/aberp-site.service` also pins this via `Environment=BODY_SIZE_LIMIT=52428800` as a fallback when `/etc/aberp-site.env` is silent. Reinstalling the unit (`sudo install -m 0644 docs/aws/aberp-site.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl restart aberp-site`) lifts the floor without any env-file edit.
+
+**Why:** S285 review F1 — `docs/reviews/S285-adversarial-storefront-arc.md` — documented this as the #1 blocker for the first walkthrough run. Two endpoints exceed adapter-node's 512 KB default:
+
+- `POST /api/quote` carries customer CAD up to 50 MB.
+- `POST /api/quotes/{id}/priced` carries the priced PDF up to 6 MB (ADR-0004 design max).
+
+The single env var has to be ≥ the larger of the two (= 50 MB). Setting it to 6 MB to "match" ADR-0004 breaks CAD upload — don't do that.
 
 ---
 

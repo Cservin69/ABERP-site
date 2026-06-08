@@ -114,10 +114,14 @@ export const POST: RequestHandler = async ({ params, request }) => {
 	if (!UUID_RE.test(id)) return json({ error: 'Invalid id.' }, { status: 400 });
 
 	const declared = request.headers.get('content-length');
+	let declaredLength: number | null = null;
 	if (declared !== null) {
 		const n = Number.parseInt(declared, 10);
-		if (Number.isFinite(n) && n > BODY_MAX_BYTES) {
-			return json({ error: 'payload too large' }, { status: 413 });
+		if (Number.isFinite(n)) {
+			if (n > BODY_MAX_BYTES) {
+				return json({ error: 'payload too large' }, { status: 413 });
+			}
+			declaredLength = n;
 		}
 	}
 
@@ -125,6 +129,23 @@ export const POST: RequestHandler = async ({ params, request }) => {
 	try {
 		form = await request.formData();
 	} catch {
+		// A multipart parse failure on a non-trivial declared body is the
+		// fingerprint of upstream truncation — adapter-node's BODY_SIZE_LIMIT,
+		// CloudFront, or nginx cut the body mid-stream and the multipart
+		// boundaries no longer close. Surface this distinctly so the operator
+		// knows where to look (S285 finding F1).
+		if (declaredLength !== null && declaredLength > 512 * 1024) {
+			return json(
+				{
+					error: 'body_truncated_by_proxy_or_adapter',
+					hint:
+						`multipart parse failed on a body declared ${declaredLength} bytes; ` +
+						`check BODY_SIZE_LIMIT on the storefront process and any CloudFront/nginx ` +
+						`body caps in front of it`
+				},
+				{ status: 413 }
+			);
+		}
 		return json({ error: 'failed to parse multipart body' }, { status: 400 });
 	}
 

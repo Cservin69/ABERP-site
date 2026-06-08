@@ -1,9 +1,9 @@
 import { env } from '$env/dynamic/private';
 import { timingSafeEqual } from 'node:crypto';
 import type { Handle } from '@sveltejs/kit';
+import { verifyBodySizeLimit } from '$lib/server/body-size-limit';
 
 const SECRET_HEADER = 'x-cloudfront-secret';
-const EXPECTED_BODY_SIZE_LIMIT = 52_428_800;
 let bodyLimitChecked = false;
 
 function safeEqual(a: string, b: string): boolean {
@@ -33,15 +33,8 @@ function safeEqual(a: string, b: string): boolean {
 function checkBodySizeLimitOnce(): void {
 	if (bodyLimitChecked) return;
 	bodyLimitChecked = true;
-	const raw = process.env.BODY_SIZE_LIMIT;
-	const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-	if (!Number.isFinite(parsed) || parsed < EXPECTED_BODY_SIZE_LIMIT) {
-		console.warn(
-			`[aberp-site] BODY_SIZE_LIMIT=${raw ?? '(unset, adapter-node default 524288)'} ` +
-				`< ${EXPECTED_BODY_SIZE_LIMIT}. CAD uploads larger than this will 413 ` +
-				`before the /api/quote handler runs. Set BODY_SIZE_LIMIT=52428800.`
-		);
-	}
+	const verdict = verifyBodySizeLimit();
+	if (!verdict.ok) console.warn(verdict.message);
 }
 
 export const handle: Handle = async ({ event, resolve }) => {
