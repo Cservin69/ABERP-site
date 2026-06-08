@@ -3,7 +3,7 @@ import { json } from '@sveltejs/kit';
 import { writeFile, mkdir } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { resolve as pathResolve, join, basename, extname } from 'node:path';
-import type { QuoteMetadata } from '$lib/server/quote-store';
+import { writeQuoteAtomic, type QuoteMetadata } from '$lib/server/quote-store';
 import { sendSubmissionReceivedEmail } from '$lib/server/email';
 import { validateCadFile } from '$lib/server/cad-validate';
 import { assertSameOrigin } from '$lib/server/origin-check';
@@ -230,11 +230,12 @@ export const POST: RequestHandler = async ({ request }) => {
 		consent_at: nowIso
 	};
 
-	const metadataPath = join(quoteDir, 'metadata.json');
 	// Persist the quote BEFORE notifying. The quote on disk is the source of
 	// truth; a lost notification is recoverable from /admin/quotes, a lost quote
 	// is not. Notification is best-effort and never blocks the 200 response.
-	await writeFile(metadataPath, JSON.stringify(metadata, null, 2), 'utf8');
+	// Use writeQuoteAtomic (tmp + rename) so a crash mid-write cannot leave a
+	// half-written metadata.json — S285 finding F13.
+	await writeQuoteAtomic(id, metadata);
 
 	// PR-07: fire-and-forget the bilingual "submission received" email per
 	// [[post-issue-async]] and ADR-0007 §"Negative". The customer's 200 OK does

@@ -1,4 +1,4 @@
-import { readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { resolve as pathResolve, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -155,14 +155,20 @@ export function pricedPdfPath(id: string): string | null {
 
 /**
  * Atomic write of the priced PDF: tmpfile + rename, same posture as
- * writeQuoteAtomic. The quote directory is created by the original
- * submission, so a missing dir here is a real error (caller should 404).
+ * writeQuoteAtomic. The quote directory is normally created by the original
+ * submission, but the priced writeback is called by ABERP retrying through a
+ * network — an operator cleanup or migration that removed the dir between
+ * submit and priced-writeback would otherwise 500 forever in an ABERP retry
+ * loop (S285 finding F11). `mkdir { recursive: true }` is a one-line
+ * idempotent guard; the metadata.json read still 404s upstream if the
+ * metadata is genuinely gone.
  */
 export async function writePricedPdfAtomic(id: string, bytes: Uint8Array): Promise<void> {
 	const target = pricedPdfPath(id);
 	if (!target) throw new Error('Invalid quote id.');
 	const dir = quoteDir(id);
 	if (!dir) throw new Error('Invalid quote id.');
+	await mkdir(dir, { recursive: true });
 	const tmp = join(dir, `priced.pdf.tmp-${randomUUID()}`);
 	await writeFile(tmp, bytes);
 	await rename(tmp, target);

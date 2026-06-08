@@ -449,3 +449,134 @@ describe('sendAcceptedConfirmationEmail', () => {
 		expect(body.subject).toContain('elfogadva');
 	});
 });
+
+describe('rate-limit — per-(recipient, kind) cooldown (S285 F2)', () => {
+	it('submission-received does NOT block a subsequent priced-ready to the same recipient', async () => {
+		configure();
+		// First send: submission-received reserves (ada@example.com, submission-received).
+		const first = await sendSubmissionReceivedEmail(makeQuote());
+		expect(first.status).toBe('sent');
+		// Second send within the 60s window but a DIFFERENT kind — must NOT be
+		// rate-limited. Pre-PR-09 (S285 F2) this returned 'skipped' silently and
+		// the walkthrough's "priced-ready arrives within 30s" promise was fiction.
+		const second = await sendPricedReadyEmail(
+			makeQuote({
+				status: 'quoted',
+				pricing: {
+					received_at: '2026-06-08T10:00:00.000Z',
+					valid_until: '2026-07-08',
+					breakdown_json: {},
+					pdf_stored_at: 'priced.pdf',
+					feature_graph_hash: 'blake3:abc',
+					extractor_version: 'v1',
+					engine_version: 'v1',
+					stock_alert: false
+				}
+			})
+		);
+		expect(second.status).toBe('sent');
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+	});
+
+	it('priced-ready does NOT block a subsequent accepted-confirmation to the same recipient', async () => {
+		configure();
+		const priced = await sendPricedReadyEmail(
+			makeQuote({
+				status: 'quoted',
+				pricing: {
+					received_at: '2026-06-08T10:00:00.000Z',
+					valid_until: '2026-07-08',
+					breakdown_json: {},
+					pdf_stored_at: 'priced.pdf',
+					feature_graph_hash: 'blake3:abc',
+					extractor_version: 'v1',
+					engine_version: 'v1',
+					stock_alert: false
+				}
+			})
+		);
+		expect(priced.status).toBe('sent');
+		const accepted = await sendAcceptedConfirmationEmail(makeQuote({ status: 'approved' }));
+		expect(accepted.status).toBe('sent');
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+	});
+
+	it('two submission-received emails to the SAME recipient within 60s still cool down', async () => {
+		configure();
+		const first = await sendSubmissionReceivedEmail(makeQuote());
+		expect(first.status).toBe('sent');
+		// Same recipient + same kind → cooldown applies. The cooldown is the
+		// defense against "user double-clicks submit and lands two notifies".
+		const second = await sendSubmissionReceivedEmail(
+			makeQuote({ id: 'aaaaaaaa-bbbb-cccc-dddd-000000000002' })
+		);
+		expect(second.status).toBe('skipped');
+		expect(second.reason).toBe('rate-limited');
+	});
+});
+
+describe('rate-limit — release on failure (S285 F14)', () => {
+	it('a relay 503 releases the global slot so the next sender is not falsely rate-limited', async () => {
+		configure();
+		// First send fails — slot must be returned to the pool, not burned.
+		fetchMock.mockImplementationOnce(async () => new Response('', { status: 503 }));
+		const failed = await sendSubmissionReceivedEmail(makeQuote());
+		expect(failed.status).toBe('failed');
+
+		// A DIFFERENT recipient should land — proves the global slot did not get
+		// consumed by the failed send. (Same recipient + same kind would also
+		// not get cooled down because release() also cleared the cooldown entry,
+		// but using a different recipient isolates the global-slot release.)
+		const next = await sendSubmissionReceivedEmail(
+			makeQuote({
+				id: 'aaaaaaaa-bbbb-cccc-dddd-000000000099',
+				contact: { name: 'Other', email: 'other@example.com', company: '' }
+			})
+		);
+		expect(next.status).toBe('sent');
+	});
+
+	it('a relay 503 releases the per-(recipient,kind) cooldown so an immediate retry is not blocked', async () => {
+		configure();
+		fetchMock.mockImplementationOnce(async () => new Response('', { status: 503 }));
+		const failed = await sendSubmissionReceivedEmail(makeQuote());
+		expect(failed.status).toBe('failed');
+
+		// Same recipient + same kind, immediately. With pre-PR-09 reserve-and-keep,
+		// the cooldown would have stuck and the retry would silently 'skipped'.
+		const retry = await sendSubmissionReceivedEmail(makeQuote());
+		expect(retry.status).toBe('sent');
+	});
+
+	it('30 failures in a row do NOT trip the 30/min global ceiling (S285 F14 belt-and-braces)', async () => {
+		configure();
+		// Every send fails — without slot release, the 30/min ceiling would be
+		// burned by 30 failed sends and the 31st (successful) send would 'skipped'.
+		fetchMock.mockImplementation(async () => new Response('', { status: 503 }));
+		for (let i = 0; i < 30; i++) {
+			const r = await sendSubmissionReceivedEmail(
+				makeQuote({
+					id: `aaaaaaaa-bbbb-cccc-dddd-${String(i).padStart(12, '0')}`,
+					contact: { name: `User ${i}`, email: `u${i}@example.com`, company: '' }
+				})
+			);
+			expect(r.status).toBe('failed');
+		}
+		// Now the relay recovers — the next send must land, not 'skipped' on a
+		// burned ceiling.
+		fetchMock.mockImplementation(
+			async () =>
+				new Response(JSON.stringify({ audit_id: 'evt_ok' }), {
+					status: 200,
+					headers: { 'content-type': 'application/json' }
+				})
+		);
+		const after = await sendSubmissionReceivedEmail(
+			makeQuote({
+				id: 'aaaaaaaa-bbbb-cccc-dddd-fffffffffffe',
+				contact: { name: 'Survivor', email: 'survivor@example.com', company: '' }
+			})
+		);
+		expect(after.status).toBe('sent');
+	});
+});

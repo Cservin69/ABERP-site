@@ -85,6 +85,28 @@ describe('quote-token — status surface', () => {
 		}
 	});
 
+	it('throws 503 when QUOTE_STATUS_SIGNING_KEY is shorter than 32 bytes (S285 F7 entropy floor)', () => {
+		envState.QUOTE_STATUS_SIGNING_KEY = 'x'; // 1 byte — short enough that no operator should get a green light
+		try {
+			signQuoteToken(ID);
+			expect.unreachable('expected 503 to throw');
+		} catch (err) {
+			expect((err as { status: number; body?: { message?: string } }).status).toBe(503);
+		}
+	});
+
+	it('throws 503 on a 31-byte key (just under the floor) but not 32', () => {
+		envState.QUOTE_STATUS_SIGNING_KEY = 'a'.repeat(31);
+		try {
+			signQuoteToken(ID);
+			expect.unreachable('expected 503 to throw');
+		} catch (err) {
+			expect((err as { status: number }).status).toBe(503);
+		}
+		envState.QUOTE_STATUS_SIGNING_KEY = 'a'.repeat(32);
+		expect(() => signQuoteToken(ID)).not.toThrow();
+	});
+
 	it('verifier accepts legacy PR-L no-domain-marker tokens during the transition window', () => {
 		// Pre-ADR-0005 wire shape — HMAC over `id` with no "|status" suffix.
 		const legacy = createHmac('sha256', KEY).update(ID).digest('base64url');

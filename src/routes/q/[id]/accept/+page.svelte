@@ -22,7 +22,7 @@
 
 <svelte:head>
 	<title>Ajánlat elfogadása {data.quote.shortId} — ABENERP</title>
-	<meta name="robots" content="noindex, nofollow" />
+	<meta name="robots" content="noindex, nofollow, noarchive, nocache, noimageindex" />
 </svelte:head>
 
 <main class="page">
@@ -271,11 +271,14 @@
 		font-size: 0.85rem;
 	}
 
+	/* Addendum-2 "BIG/RED" stock-alert (S285 F9). Reuses #c66a6a — the same
+	   red the big-input border uses on empty/mismatch — so it reads as a
+	   single storefront red, not a new palette entry. */
 	.stock-alert {
 		padding: 0.75rem 0.9rem;
-		border: 1px solid rgba(232, 188, 90, 0.55);
-		background: rgba(232, 188, 90, 0.08);
-		color: #f0d480;
+		border: 1px solid rgba(198, 106, 106, 0.55);
+		background: rgba(198, 106, 106, 0.08);
+		color: #e8a8a8;
 		border-radius: 2px;
 		font-size: 0.9rem;
 		line-height: 1.5;

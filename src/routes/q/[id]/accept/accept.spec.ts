@@ -166,7 +166,8 @@ describe('GET /q/{id}/accept — signature + expiry verification', () => {
 		const { ts, sig } = await freshSig(QUOTE_ID);
 		const event = {
 			params: { id: QUOTE_ID },
-			url: url(QUOTE_ID, ts, sig)
+			url: url(QUOTE_ID, ts, sig),
+			setHeaders: () => {}
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
 		} as any;
 		const data = await load(event);
@@ -183,7 +184,8 @@ describe('GET /q/{id}/accept — signature + expiry verification', () => {
 		const { ts, sig } = await freshSig(QUOTE_ID);
 		const event = {
 			params: { id: QUOTE_ID },
-			url: url(QUOTE_ID, ts, sig)
+			url: url(QUOTE_ID, ts, sig),
+			setHeaders: () => {}
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
 		} as any;
 		const data = await load(event);
@@ -196,7 +198,8 @@ describe('GET /q/{id}/accept — signature + expiry verification', () => {
 		const { ts, sig } = await freshSig(QUOTE_ID);
 		const event = {
 			params: { id: QUOTE_ID },
-			url: url(QUOTE_ID, ts, sig)
+			url: url(QUOTE_ID, ts, sig),
+			setHeaders: () => {}
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
 		} as any;
 		expect(await statusOf(load(event))).toBe(409);
@@ -211,6 +214,43 @@ describe('GET /q/{id}/accept — signature + expiry verification', () => {
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
 		} as any;
 		expect(await statusOf(load(event))).toBe(404);
+	});
+
+	it('sets cache-control: private, no-store on every load (S285 F10 — PII prefetch defense)', async () => {
+		seedQuote(QUOTE_ID, 'quoted', { pricing: pricingFor() });
+		const { load } = await loadModule();
+		const { ts, sig } = await freshSig(QUOTE_ID);
+		const headers: Record<string, string> = {};
+		const event = {
+			params: { id: QUOTE_ID },
+			url: url(QUOTE_ID, ts, sig),
+			setHeaders: (h: Record<string, string>) => Object.assign(headers, h)
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
+		} as any;
+		await load(event);
+		// `private` keeps shared caches out; `no-store` keeps disk caches out; both
+		// frustrate MTA-side prefetchers (Outlook Safe Links, Gmail Mailer-Daemon,
+		// corporate egress proxies) that would otherwise speculatively GET the link
+		// and end up holding customer name/email in some intermediate cache.
+		expect(headers['cache-control']).toBe('private, no-store, max-age=0');
+		expect(headers['pragma']).toBe('no-cache');
+	});
+
+	it('sets prefetch-defense headers even on the already-approved branch (S285 F10)', async () => {
+		seedQuote(QUOTE_ID, 'approved', { pricing: pricingFor() });
+		const { load } = await loadModule();
+		const { ts, sig } = await freshSig(QUOTE_ID);
+		const headers: Record<string, string> = {};
+		const event = {
+			params: { id: QUOTE_ID },
+			url: url(QUOTE_ID, ts, sig),
+			setHeaders: (h: Record<string, string>) => Object.assign(headers, h)
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
+		} as any;
+		await load(event);
+		// already-approved still renders customer name + email in the thank-you
+		// copy, so the same headers must apply.
+		expect(headers['cache-control']).toContain('no-store');
 	});
 
 	it('rejects a status-link signature presented as an accept signature (domain separation)', async () => {

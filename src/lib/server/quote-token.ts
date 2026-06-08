@@ -26,11 +26,25 @@ const DIGEST_BYTES = 32;
 /** 30-day accept-token lifetime per ADR-0005. */
 export const ACCEPT_TOKEN_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
 
+/**
+ * Minimum signing-key length, in UTF-8 bytes. 32 bytes ≈ 256 bits — the
+ * security level of the HMAC-SHA256 digest itself; a shorter key is the
+ * weaker link of the chain. S285 finding F7: per [[trust-code-not-operator]]
+ * an operator setting QUOTE_STATUS_SIGNING_KEY=x should not get a green light.
+ */
+export const MIN_SIGNING_KEY_BYTES = 32;
+
 function getSigningKey(): string {
 	const key = env.QUOTE_STATUS_SIGNING_KEY;
 	if (!key || key.length === 0) {
 		// Refuse-to-serve rather than issue forgeable links, mirroring auth.ts.
 		throw error(503, 'Server is not configured: QUOTE_STATUS_SIGNING_KEY required.');
+	}
+	if (Buffer.byteLength(key, 'utf8') < MIN_SIGNING_KEY_BYTES) {
+		throw error(
+			503,
+			`Server is not configured: QUOTE_STATUS_SIGNING_KEY must be ≥${MIN_SIGNING_KEY_BYTES} bytes (got ${Buffer.byteLength(key, 'utf8')}).`
+		);
 	}
 	return key;
 }

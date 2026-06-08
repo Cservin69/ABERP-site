@@ -71,7 +71,7 @@ function verifySignedLink(id: string, ts: string, sig: string): void {
 	}
 }
 
-export const load: PageServerLoad = async ({ params, url }) => {
+export const load: PageServerLoad = async ({ params, url, setHeaders }) => {
 	const id = params.id ?? '';
 	const ts = url.searchParams.get('ts') ?? '';
 	const sig = url.searchParams.get('sig') ?? '';
@@ -85,6 +85,18 @@ export const load: PageServerLoad = async ({ params, url }) => {
 
 	const quote = await readQuote(id);
 	if (!quote) throw error(404, 'Not found.');
+
+	// S285 F10 — the accept GET renders customer PII (name, email, valid_until)
+	// before any typed-ACCEPT gate runs. MTA prefetchers (Outlook Safe Links,
+	// Gmail Mailer-Daemon, corporate proxies) speculatively fetch links in
+	// inbound mail and the prefetched body would otherwise be cacheable. Hard-
+	// disable intermediate caching and archive scrapes once we know we're
+	// about to surface a real quote; the early 403/404 paths above never reach
+	// here so they neither leak PII nor force the headers.
+	setHeaders({
+		'cache-control': 'private, no-store, max-age=0',
+		pragma: 'no-cache'
+	});
 
 	// Idempotent landing: a re-clicked link on an already-approved quote shows
 	// the "already accepted" page instead of a hard 409 (ADR-0005 §"Single-use

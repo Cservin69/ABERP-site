@@ -65,7 +65,24 @@ export function isEmailConfigured(): boolean {
 // Single-instance adapter-node deployment, so in-memory state is sufficient.
 const GLOBAL_WINDOW_MS = 60_000;
 const GLOBAL_MAX = 30; // messages per rolling minute across all recipients
-const RECIPIENT_COOLDOWN_MS = 60_000; // min gap between two mails to one address
+const RECIPIENT_COOLDOWN_MS = 60_000; // min gap between two mails of the SAME KIND to one address
+
+/**
+ * Message-kind tags used to scope the per-recipient cooldown. S285 F2: the
+ * pre-PR-09 cooldown was per-recipient flat, which silently dropped the
+ * priced-ready email whenever it landed within 60s of the submission-received
+ * email — i.e. on every fast walkthrough. Tuple-scoping the cooldown stops
+ * one legitimate-message-class from cannibalising another while still
+ * defeating "press submit twelve times" floods on a single kind.
+ *
+ * The set is closed: each call site passes a literal so a future surface
+ * cannot land an untagged send by accident.
+ */
+export type EmailKind =
+	| 'submission-received'
+	| 'operator-notify'
+	| 'priced-ready'
+	| 'accepted-confirmation';
 
 const globalSends: number[] = [];
 const recipientLastSend = new Map<string, number>();
@@ -82,18 +99,49 @@ function pruneGlobal(now: number): void {
 	}
 }
 
+function cooldownKey(recipient: string, kind: EmailKind): string {
+	return `${recipient.toLowerCase()}|${kind}`;
+}
+
+interface Reservation {
+	/** Releases the global slot and clears the per-(recipient,kind) cooldown. */
+	release(): void;
+}
+
 /**
- * Reserves a send slot for `recipient`. Returns false (and reserves nothing)
- * when the global window is full or the recipient is in cooldown.
+ * Reserves a send slot for `recipient` × `kind`. Returns null when the global
+ * window is full or the recipient is in cooldown for THIS kind. On a
+ * successful reserve the caller gets a `Reservation` whose `release()` pops
+ * both the global slot and the cooldown entry — call it when the send fails
+ * so a flaky relay does not burn the 30/min ceiling for everyone (S285 F14).
  */
-function tryReserve(recipient: string, now: number): boolean {
+function tryReserve(recipient: string, kind: EmailKind, now: number): Reservation | null {
 	pruneGlobal(now);
-	if (globalSends.length >= GLOBAL_MAX) return false;
-	const last = recipientLastSend.get(recipient.toLowerCase());
-	if (last !== undefined && now - last < RECIPIENT_COOLDOWN_MS) return false;
+	if (globalSends.length >= GLOBAL_MAX) return null;
+	const key = cooldownKey(recipient, kind);
+	const last = recipientLastSend.get(key);
+	if (last !== undefined && now - last < RECIPIENT_COOLDOWN_MS) return null;
 	globalSends.push(now);
-	recipientLastSend.set(recipient.toLowerCase(), now);
-	return true;
+	recipientLastSend.set(key, now);
+	return {
+		release(): void {
+			// Pop OUR timestamp from the FIFO. We push at the tail; under normal
+			// concurrency the matching slot is the most recent equal-valued entry,
+			// so a backwards scan is correct even when other sends raced.
+			for (let i = globalSends.length - 1; i >= 0; i--) {
+				if (globalSends[i] === now) {
+					globalSends.splice(i, 1);
+					break;
+				}
+			}
+			// Clear the cooldown only if it still points at our reservation —
+			// otherwise a later successful send for the same (recipient, kind)
+			// would have its cooldown wrongly wiped.
+			if (recipientLastSend.get(key) === now) {
+				recipientLastSend.delete(key);
+			}
+		}
+	};
 }
 
 // --- Sanitization --------------------------------------------------------
@@ -258,7 +306,8 @@ export async function sendSubmissionReceivedEmail(
 	}
 	const customerEmail = headerSafe(q.contact.email);
 	if (!customerEmail) return { status: 'skipped', reason: 'no-recipient' };
-	if (!tryReserve(customerEmail, Date.now())) {
+	const reservation = tryReserve(customerEmail, 'submission-received', Date.now());
+	if (!reservation) {
 		return { status: 'skipped', reason: 'rate-limited' };
 	}
 	const statusUrl = buildQuoteStatusUrl(q.id);
@@ -270,7 +319,10 @@ export async function sendSubmissionReceivedEmail(
 		body_text: msg.text,
 		body_html: msg.html
 	});
-	if (!res) return { status: 'failed', reason: 'relay-failed' };
+	if (!res) {
+		reservation.release();
+		return { status: 'failed', reason: 'relay-failed' };
+	}
 	return { status: 'sent', audit_id: res.audit_id };
 }
 
@@ -367,7 +419,8 @@ export async function sendQuoteNotifications(q: QuoteMetadata): Promise<NotifyRe
 	const now = Date.now();
 
 	// Operator notification.
-	if (tryReserve(cfg.operator, now)) {
+	const opReservation = tryReserve(cfg.operator, 'operator-notify', now);
+	if (opReservation) {
 		const msg = buildOperatorEmail(q, cfg.publicUrl);
 		const res = await relaySendSafe({
 			to: [cfg.operator],
@@ -375,7 +428,12 @@ export async function sendQuoteNotifications(q: QuoteMetadata): Promise<NotifyRe
 			body_text: msg.text,
 			body_html: msg.html
 		});
-		result.operator = res ? 'sent' : 'failed';
+		if (res) {
+			result.operator = 'sent';
+		} else {
+			opReservation.release();
+			result.operator = 'failed';
+		}
 	} else {
 		result.reason = 'rate-limited';
 	}
@@ -383,7 +441,10 @@ export async function sendQuoteNotifications(q: QuoteMetadata): Promise<NotifyRe
 	// Customer confirmation. The relay does not have a per-call reply-to knob —
 	// the canonical sender on ABERP carries Reply-To at relay config time.
 	const customerEmail = headerSafe(q.contact.email);
-	if (customerEmail && tryReserve(customerEmail, Date.now())) {
+	const custReservation = customerEmail
+		? tryReserve(customerEmail, 'submission-received', Date.now())
+		: null;
+	if (customerEmail && custReservation) {
 		const msg = buildCustomerEmail(q);
 		const res = await relaySendSafe({
 			to: [customerEmail],
@@ -392,7 +453,12 @@ export async function sendQuoteNotifications(q: QuoteMetadata): Promise<NotifyRe
 			body_text: msg.text,
 			body_html: msg.html
 		});
-		result.customer = res ? 'sent' : 'failed';
+		if (res) {
+			result.customer = 'sent';
+		} else {
+			custReservation.release();
+			result.customer = 'failed';
+		}
 	} else if (!customerEmail) {
 		result.customer = 'skipped';
 	} else {
@@ -423,7 +489,8 @@ export async function sendPricedReadyEmail(q: QuoteMetadata): Promise<PricedRead
 	if (!cfg) return { status: 'skipped', reason: 'unconfigured' };
 	const customerEmail = headerSafe(q.contact.email);
 	if (!customerEmail) return { status: 'skipped', reason: 'no-recipient' };
-	if (!tryReserve(customerEmail, Date.now())) {
+	const reservation = tryReserve(customerEmail, 'priced-ready', Date.now());
+	if (!reservation) {
 		return { status: 'skipped', reason: 'rate-limited' };
 	}
 
@@ -458,7 +525,10 @@ export async function sendPricedReadyEmail(q: QuoteMetadata): Promise<PricedRead
 		body_html: msg.html,
 		attachments
 	});
-	if (!res) return { status: 'failed', reason: 'relay-failed' };
+	if (!res) {
+		reservation.release();
+		return { status: 'failed', reason: 'relay-failed' };
+	}
 	return { status: 'sent', audit_id: res.audit_id };
 }
 
@@ -479,7 +549,8 @@ export async function sendAcceptedConfirmationEmail(
 	if (!cfg) return { status: 'skipped', reason: 'unconfigured' };
 	const customerEmail = headerSafe(q.contact.email);
 	if (!customerEmail) return { status: 'skipped', reason: 'no-recipient' };
-	if (!tryReserve(customerEmail, Date.now())) {
+	const reservation = tryReserve(customerEmail, 'accepted-confirmation', Date.now());
+	if (!reservation) {
 		return { status: 'skipped', reason: 'rate-limited' };
 	}
 	const msg = buildAcceptedConfirmationEmail(q);
@@ -490,7 +561,10 @@ export async function sendAcceptedConfirmationEmail(
 		body_text: msg.text,
 		body_html: msg.html
 	});
-	if (!res) return { status: 'failed', reason: 'relay-failed' };
+	if (!res) {
+		reservation.release();
+		return { status: 'failed', reason: 'relay-failed' };
+	}
 	return { status: 'sent', audit_id: res.audit_id };
 }
 

@@ -354,16 +354,19 @@
 		color: #c9a8e0;
 	}
 
+	/* Addendum-2 "BIG/RED" stock-alert (S285 F9). Reuses the same red
+	   (#c66a6a) the accept-page input border uses on empty/mismatch — one
+	   storefront red, not a new palette entry. */
 	.stock-alert {
-		border-color: rgba(232, 188, 90, 0.55);
-		background: rgba(232, 188, 90, 0.08);
+		border-color: rgba(198, 106, 106, 0.55);
+		background: rgba(198, 106, 106, 0.08);
 	}
 
 	.stock-alert p {
 		margin: 0 0 0.45rem;
 		font-size: 0.95rem;
 		line-height: 1.5;
-		color: #f0d480;
+		color: #e8a8a8;
 	}
 
 	.stock-alert p:last-child {
@@ -371,7 +374,7 @@
 	}
 
 	.stock-alert strong {
-		color: #f6dc9a;
+		color: #f0c4c4;
 	}
 
 	.priced .pdf-link {
