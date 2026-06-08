@@ -349,9 +349,9 @@ This is the second relay-path validation (the first was Step 2's submission-rece
 
 **[ABERP desktop]** Switch to ABERP → **Ajánlatok** tab (the standard intake list).
 
-**Verify:** within ~60s (next ABERP poll cycle of `GET /api/quotes?status=approved`), the accepted quote appears in the intake list with state matching the storefront's `approved`.
+**Verify:** within ~60s (the daemon's next poll cycle — `~5 min default in prod, 60s in local-dev` per S211 daemon cadence), the accepted quote appears in the intake list with state matching the storefront's `approved`.
 
-**Caveat — flagged in §"Open questions":** the existing ABERP polling daemon (S256/S266 era) polls for `status=approved`. The S283/PR-04 storefront flips `quoted → approved` on the HMAC accept commit. **If the row does not appear within 5 minutes, the new HMAC-driven `approved` state may not be picked up by the legacy intake daemon** — confirm by looking at ABERP → Settings → Quote Intake → "last cycle" timestamp; if the cycle is firing but the row never appears, this is the open-question gap and the walkthrough surfaces a real backlog item. Otherwise continue.
+**Wire validated in S294/PR-08:** the storefront's `GET /api/quotes?status=approved` endpoint now has unit-test coverage proving the exact shape ABERP consumes — `contact.{name,email}`, `request.{material_preference,quantity,deadline}`, `pricing.{valid_until,breakdown_json}`, plus the acceptance audit trio (`accepted_at`, `acceptance_signature_ts`, optional `acceptance_audit_id`). The same PR added an optional `?since=<iso>` cursor so the daemon can poll incrementally (`since=accepted_at >= cursor` when `status=approved`), keeping wire bytes proportional to new approvals rather than the full history. **If the row still does not appear within one poll cycle plus a margin**, jump to Troubleshooting §"Approved row not picked up by ABERP" — the wire is now load-bearing for prod and the failure mode is bearer or env-var, not the contract itself.
 
 ---
 
@@ -457,6 +457,22 @@ For each predictable failure mode: symptom Ervin sees, WHERE to look first, and 
 - **Symptom:** journalctl shows repeating `EmailRelayError('unavailable', 503)`.
 - **WHERE:** ABERP — likely SMTP daemon down or ABERP's `outbound_email_queue` table backed up. ABERP-side fix; the storefront's retry will resume once ABERP returns 200.
 
+### Approved row not picked up by ABERP (Step 8 hangs)
+
+- **Symptom:** Step 6 confirmed `Elfogadva / Accepted` on the storefront, but Step 8's Ajánlatok tab shows no new row after one full daemon poll cycle (≥ 5 min in prod, ≥ 60s in local-dev).
+- **WHERE first:** **[Browser SSH / local terminal]** curl the polling endpoint with the same bearer ABERP uses, and confirm the row is on the wire:
+
+  ```sh
+  curl -fsS -H "Authorization: Bearer $(sudo grep '^ABERP_SITE_ADMIN_TOKEN=' /etc/aberp-site.env | cut -d= -f2-)" \
+    "$(sudo grep '^ABERP_SITE_PUBLIC_URL=' /etc/aberp-site.env | cut -d= -f2-)/api/quotes?status=approved" \
+    | jq '.quotes[] | {id, status, accepted_at, acceptance_signature_ts}'
+  ```
+
+  - **Row present in the curl output** → the storefront wire is fine; the gap is ABERP-side. Check ABERP → Settings → Quote Intake → "last cycle" timestamp (is the daemon still firing?) and the bearer (`ABERP_QUOTE_INTAKE_TOKEN`-side / `ABERP_SITE_ADMIN_TOKEN`-side match).
+  - **Row absent from the curl output** → storefront did not persist the transition. Look at the storefront's `/data/quotes/<UUID>/metadata.json` on the Lightsail box; `status` should read `"approved"` and `accepted_at` should be an ISO timestamp. If `status` is still `"quoted"`, the accept POST 403'd (see "Accept page 403 from the POST" above) and the customer's "approved" landing page was actually the idempotent replay of an earlier already-approved quote, not a fresh transition.
+
+- **Fix (incremental-poll edge case):** if ABERP started passing `?since=<iso>` after S294/PR-08 and the row's `accepted_at` is older than the cursor, the daemon will not refetch it. This is by design — re-issue the quote or have the operator reset the daemon's last-cursor watermark in ABERP → Settings → Quote Intake.
+
 ### HMAC accept link 403 / "expired"
 
 - **Symptom:** Step 6's accept-link click lands on a 403 page reading "this accept link has expired or is invalid."
@@ -490,7 +506,7 @@ The following are real gaps surfaced by writing this walkthrough. None blocks th
 
 4. ~~**"Submission received" email path — does the storefront send one today?**~~ **Shipped in PR-07 (S293).** `src/lib/server/email.ts` now exports `sendSubmissionReceivedEmail(q)` — a bilingual HU+EN template with the customer's signed status link. `/api/quote` fires it via `setImmediate` after the quote is persisted to disk, so the customer's 200 OK never blocks on the relay round-trip per `[[post-issue-async]]`. Failure paths (missing token, 503) log and swallow; the relay-side audit (`email.relayed_storefront`) is the source of truth ABERP-side. Step 2 above reflects the new shape.
 
-5. **Storefront `quoted → approved` flow into ABERP intake.** Step 8 of the test path assumes the existing ABERP polling daemon (which polls `GET /api/quotes?status=approved`) picks up the HMAC-accepted quote. **If it doesn't (e.g. the daemon is gated on a different status name like "accepted" rather than "approved", or it expects the legacy operator-driven approval shape), Step 8 hangs and the DEAL saga in Steps 9-11 can't run.** This is the most likely concrete backlog item out of this walkthrough — file as PR-06 if Step 8 fails.
+5. ~~**Storefront `quoted → approved` flow into ABERP intake.**~~ **Shipped in S294/PR-08.** `src/routes/api/quotes/+server.ts` now has unit-test coverage proving the response shape ABERP consumes — `contact.{name,email}`, `request.{material_preference,quantity,deadline}`, `pricing.{valid_until,breakdown_json}`, and the acceptance audit trio (`accepted_at`, `acceptance_signature_ts`, optional `acceptance_audit_id`). The accept handler's `quoted → approved` transition (S283, untouched in this PR) lands the row directly in the polling endpoint's result set with all fields populated. PR-08 also added an optional `?since=<iso>` cursor — when `status=approved` it filters on `accepted_at >= since`, otherwise on `received_at >= since` — so the daemon can poll incrementally without re-fetching the full history. **Backlog deferred to next PR (out of scope for PR-08 per S294 brief):** ABERP-side operator-notification polish — when the daemon stages a newly-approved row into `quote_intake_log`, the Ajánlatok tab should surface the storefront `accepted_at` timestamp + a link back to `/q/{id}` for the audit trail. Step 8 of the test path above now treats the wire as load-bearing rather than speculative.
 
 ---
 
