@@ -12,6 +12,70 @@
 
 ---
 
+## Local-dev test path (achievable today, 2026-06-08)
+
+**Read this first if you are running the test against a Mac-hosted ABERP and a `npm run dev` storefront on the same machine.** The Preflight section below is written for the eventual prod topology; tonight's reality (the storefront still cannot reach ABERP across the public internet — open question #3) is that the only achievable end-to-end run is local-dev. Five operator-discipline steps gate that run. Each is a `[[trust-code-not-operator]]` violation we are documenting honestly until S291 ships `./run/dev-test.sh` (in flight) — that launcher collapses every line below into one command.
+
+### LD-1 — [Mac terminal] Find ABERP's current loopback port
+
+ABERP binds its HTTPS loopback listener with `port=0`, so the OS assigns a fresh port every restart. Discover it:
+
+```sh
+lsof -nP -i4TCP -sTCP:LISTEN -c aberp
+```
+
+The line with the high-numbered port (e.g. `60443`, `52017`) is ABERP. Note the number; you will use it in LD-4.
+
+**Known limitation:** the storefront's `ABERP_INTERNAL_BASE_URL` has to be updated each time ABERP restarts. S291's launcher pins a fixed port (`ABERP_HTTPS_PORT=18443`) to eliminate this — until that lands, the operator re-reads `lsof` after every ABERP restart.
+
+### LD-2 — [ABERP SPA] Point ABERP at the local storefront
+
+ABERP → **Maintenance → Quote Intake → Base URL** → change from `https://abenerp.com` to `http://localhost:5173`. Save.
+
+This is what tells the catalogue-push daemon and the priced-writeback poster to dial the local Vite dev server instead of prod. If you skip this you will push the catalogue snapshot to prod and the local storefront's catalogue will be empty (or stale) — the material-grade alignment warning in Step 1 fires.
+
+S289 fixes the silent prod-pushing default; until it lands, this SPA toggle is the only safety.
+
+### LD-3 — [Mac terminal] Provision the email relay token in Keychain
+
+```sh
+TOKEN=$(openssl rand -hex 32)
+security add-generic-password \
+  -a "$USER" \
+  -s "aberp.email_relay.prod.email_relay_token" \
+  -w "$TOKEN"
+echo "$TOKEN"   # copy this — needed in LD-4
+```
+
+The same token has to be the bearer ABERP's `/api/internal/send-email` accepts and the bearer the storefront's `email-relay.ts` sends. If only one side has it, the relay returns 401 and the "your quote is ready" email is silently swallowed (logged, not raised — ADR-0007 §"Negative").
+
+### LD-4 — [Storefront terminal] Start dev with all five env vars
+
+From the ABERP-site checkout:
+
+```sh
+ABERP_SITE_PUBLIC_URL=http://localhost:5173 \
+ABERP_INTERNAL_BASE_URL=https://127.0.0.1:<port-from-LD-1> \
+ABERP_EMAIL_RELAY_TOKEN=<token-from-LD-3> \
+BODY_SIZE_LIMIT=52428800 \
+NODE_TLS_REJECT_UNAUTHORIZED=0 \
+npm run dev
+```
+
+The `NODE_TLS_REJECT_UNAUTHORIZED=0` is because ABERP's loopback listener uses a self-signed cert. Local-dev only — production uses a real TLS terminus.
+
+### LD-5 — Sanity check before Step 1
+
+- Hit `http://localhost:5173/quote` in your browser — the form renders.
+- ABERP → **Auto-árazás** tab shows "Daemon active, polling every 60s."
+- Tail `npm run dev` logs in the storefront terminal — no `BODY_SIZE_LIMIT` warning, no `EmailRelayError('unconfigured')` on boot.
+
+If any of those fails, back up and re-do the corresponding LD-step. **Skip Preflight 3 (the `/etc/aberp-site.env` checks) and Preflight 5 (the Lightsail `BODY_SIZE_LIMIT` check) — those are Lightsail-only.** Preflight 1 (ABERP version), Preflight 2 (storefront SHA — replace with `git -C $PWD log -1 --oneline` against your local checkout), and Preflight 4 (daemon active) still apply.
+
+**Forward link:** once S291's `./run/dev-test.sh` lands, LD-1 through LD-5 collapse to one command. Once S299's network-topology ADR closes (Cloudflare Tunnel / Tailscale / public TLS / polling-only), the prod-style preflight below becomes achievable without local-dev workarounds.
+
+---
+
 ## Preflight
 
 Run all five preflight checks before starting Step 1 of the test path. Each verifies one boundary that has to be true for the pipeline to advance.
@@ -159,10 +223,10 @@ Fill the form:
 
 - **Name:** `Walkthrough Test`
 - **Email:** an address you can read (use the plus-trick: `you+walkthrough@yourdomain.com` so it's distinct from any prior test).
-- **Material:** pick from the dropdown. **Pick a simple in-stock grade** (e.g. `Aluminium 6061-T6` if available — for the first end-to-end run, avoid materials with `stock_status != in_stock` so the addendum-2 banner test is a clean separate run later).
+- **Material:** pick from the dropdown — **but type a grade from ABERP's seeded catalogue**: `6061-T6`, `7075-T651`, `304`, `316`, `Ti-6Al-4V`, `Inconel 718`, `PEEK`, or `MONEL_650`. The form's hardcoded dropdown fallback list does NOT match these grades; if you pick from the fallback list (e.g. "Aluminium 6061" without the `-T6` suffix), the pricing job fails with **"material grade `X` is not in the catalogue snapshot"** after the `Extracting` step. **Cause:** the catalogue push from ABERP to the local storefront is not yet working in local-dev (the storefront URL still defaulted to prod). **Fix:** S289 (in flight) makes the push target match LD-2's SPA setting; until then, type one of the eight grades above manually. Also for the first end-to-end run, avoid materials with `stock_status != in_stock` so the addendum-2 banner test is a clean separate run later.
 - **Quantity:** `5`.
 - **Needed-by date:** any date ≥ 2 weeks from today.
-- **CAD file:** upload **a simple known-good shape**. The S279 OCCT extractor is stubbed for many feature classes — for v1 success, use something with no thin walls, no 5-axis features, no internal pockets. A 30×30×30 mm cube STEP file is the safest first try. If you don't have one to hand, any `.step` or `.stl` cube from an earlier test will do.
+- **CAD file:** upload **a simple known-good `.stl` shape**. **STL only in v1** — the Python extractor's STEP path is stubbed (S269 deferred it; S270+ slated, actively in flight as S292). Uploading a `.step` file fails after the `Extracting` step with `"STEP extraction not yet implemented in v1"`. A 30×30×30 mm cube STL is the safest first try. For v1 success, also avoid shapes with thin walls, 5-axis features, or internal pockets — the OCCT extractor is stubbed for many feature classes.
 - **Notes:** leave blank or write `walkthrough-test`.
 - **Honeypot fields:** do not touch (they are visually hidden — if you trigger them by tab-cycling, the submit will silently 400; redo).
 
@@ -349,7 +413,20 @@ For each predictable failure mode: symptom Ervin sees, WHERE to look first, and 
 
 - **Symptom:** ABERP → Auto-árazás row reaches `Extracting` then flips RED with `Failed`.
 - **WHERE:** click the row → detail pane → "Last error" (the Python stderr is captured there).
-- **Fix:** the CAD file is unparseable. Re-submit with a simpler shape (a cube STEP). If a previously-working shape now fails, the OCCT extractor regressed — file under `[[aberp-python-auto-discovery]]` follow-up.
+- **Fix (STEP file):** "STEP extraction not yet implemented in v1" — v1 is STL-only (S269 deferred STEP; S292 in flight). Re-submit with an `.stl`. See Step 1 CAD-file note.
+- **Fix (material grade not in catalogue):** "material grade `X` is not in the catalogue snapshot" — the form's hardcoded dropdown doesn't match ABERP's seeded grades. Re-submit and type one of the eight grades listed in Step 1 (`6061-T6`, `7075-T651`, `304`, `316`, `Ti-6Al-4V`, `Inconel 718`, `PEEK`, `MONEL_650`). S289 (in flight) closes the catalogue-push gap.
+- **Fix (other):** the CAD file is unparseable. Re-submit with a simpler shape (a cube STL). If a previously-working shape now fails, the OCCT extractor regressed — file under `[[aberp-python-auto-discovery]]` follow-up.
+
+### Legacy orphan row from before daemon hardening (c1cf32 perpetually "Sikertelen / Failed")
+
+- **Symptom:** anyone who upgraded from `PROD_v2.27.0` → `PROD_v2.27.4` sees a stuck row in **Auto-árazás** with id `c1cf32ed-72b6-4708-8abb-6359d27f042b` perpetually showing **"Sikertelen / Failed — STEP extraction not yet implemented"**.
+- **WHERE:** ABERP → Auto-árazás → the row predates the daemon's retry-policy hardening; the daemon retried the same STEP-extractor stub error 5 times before being calmed in `PROD_v2.27.4`.
+- **Fix:** **not a bug — just ignore it.** This is an orphan from before the hardening landed and has no live effect on new submissions.
+- **Advanced (operator-only):** if the visible row is annoying, delete it manually from ABERP's DuckDB shell:
+  ```sql
+  DELETE FROM quote_pricing_jobs WHERE id = 'c1cf32ed-72b6-4708-8abb-6359d27f042b';
+  ```
+  Do not write a sweep script; the per-row visibility is intentional so the operator notices similar future regressions.
 
 ### POST-back 401 (pricing job stuck at `Failed` after `PostingBack`)
 
@@ -407,7 +484,7 @@ The following are real gaps surfaced by writing this walkthrough. None blocks th
 
 2. **Email-link prefetch.** Some MTAs (Outlook Safe Links, Gmail's mailer-daemon prefetch, corporate proxies) speculatively fetch URLs in email bodies. A GET of `/q/<UUID>/accept?ts=&sig=` from a prefetcher would render the accept page but NOT submit the form — so single-use enforcement holds. **However,** a future change that auto-accepts on landing (or a careless redirect) would be triggered by hover, not click. Mitigations TBD: rel="noreferrer", a typed-token gate (already implemented per Step 6), or a server-side "two-step" pattern.
 
-3. **Storefront → ABERP network topology in prod.** Today's `ABERP_INTERNAL_BASE_URL` likely points to `http://127.0.0.1:8080` (works only in local-dev when both processes share a host) or to a tunnel/VPN URL not yet specified. **Before the first real customer's quote, this topology needs a decision:** public TLS terminus on ABERP (with proper bearer hardening), Cloudflare Tunnel, Tailscale, or the "queue-and-let-ABERP-poll" fallback ADR-0007 §"Reconciliation with ADR-0006" sketched. See `[[email-send-path-pending]]`.
+3. **Storefront → ABERP network topology in prod.** Today's `ABERP_INTERNAL_BASE_URL` likely points to `http://127.0.0.1:8080` (works only in local-dev when both processes share a host) or to a tunnel/VPN URL not yet specified. **Before the first real customer's quote, this topology needs a decision:** public TLS terminus on ABERP (with proper bearer hardening), Cloudflare Tunnel, Tailscale, or the "queue-and-let-ABERP-poll" fallback ADR-0007 §"Reconciliation with ADR-0006" sketched. **S299 will land an ADR comparing these four options.** Once that ADR closes, the "Local-dev test path (achievable today)" section above will be supplemented with a "Prod test path" section that mirrors today's LD-1..LD-5 sequence but against the chosen topology — and the prod-style Preflight 1..5 will be runnable without local-dev workarounds. See `[[email-send-path-pending]]`.
 
 4. **"Submission received" email path — does the storefront send one today?** Preflight Step 2 of the test path expects an email from the storefront within ~60s of submission. **If it doesn't arrive but the rest of the pipeline succeeds**, the storefront's `sendQuoteNotifications` hook may not yet be wired through the relay for the submission-received case (only the priced-quote-ready and accept-confirmed cases were the explicit PR-04 scope). Backlog: confirm the wiring or file as PR-06.
 
@@ -424,3 +501,5 @@ The following are real gaps surfaced by writing this walkthrough. None blocks th
 - `[[aberp-python-auto-discovery]]` — S282 venv auto-provisioning so Preflight 4 just works.
 - `[[quote-csrf-origin]]` — the `ORIGIN`-env mismatch that 403s the accept POST.
 - `[[email-send-path-pending]]` — the two public-URL env vars still being reconciled.
+- `[[local-dev-test-path-gaps]]` — the five operator-discipline gaps the "Local-dev test path" section above documents honestly until S291's `./run/dev-test.sh` lands.
+- `[[trust-code-not-operator]]` — the rule each of those five LD-steps violates.
