@@ -22,11 +22,14 @@ async function writeCatalogue(snapshot: {
 }
 
 // The handler imports `$lib/server/email`, which in turn imports
-// `$env/dynamic/private` and `nodemailer`. We stub the whole email module so
-// neither tree gets touched — `sendQuoteNotifications` is contractually
-// non-throwing, so a no-op is a faithful stand-in.
+// `$env/dynamic/private` and the relay client. We stub the whole email module
+// so neither tree gets touched — `sendSubmissionReceivedEmail` is contractually
+// non-throwing, so a no-op is a faithful stand-in. (PR-07: the handler now
+// uses sendSubmissionReceivedEmail; the older sendQuoteNotifications export is
+// kept on the mock for any other importer.)
 vi.mock('$lib/server/email', () => ({
-	sendQuoteNotifications: vi.fn(async () => ({ operator: 'skipped', customer: 'skipped' }))
+	sendQuoteNotifications: vi.fn(async () => ({ operator: 'skipped', customer: 'skipped' })),
+	sendSubmissionReceivedEmail: vi.fn(async () => ({ status: 'skipped', reason: 'unconfigured' }))
 }));
 
 const HERE = dirname(fileURLToPath(import.meta.url));

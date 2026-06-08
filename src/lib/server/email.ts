@@ -185,6 +185,95 @@ export function buildCustomerEmail(q: QuoteMetadata): QuoteEmailContent {
 	return { subject, text, html };
 }
 
+// --- Submission-received template (PR-07, bilingual HU+EN) ---------------
+// Replaces the old English-only `buildCustomerEmail` send path for the
+// /api/quote flow. The latter is preserved as a utility (and unit-tested as
+// such) but is no longer called from the handler. Per the S284 walkthrough's
+// OQ #4 and [[walkthrough-format]] expectations, the customer sees one
+// bilingual message within ~10s of submit that links to the status page.
+
+export function buildSubmissionReceivedEmail(
+	q: QuoteMetadata,
+	statusUrl: string
+): QuoteEmailContent {
+	const shortId = q.id.slice(0, 8);
+	const subject = headerSafe(`Áben Consulting — Submission received, quote #${shortId}`);
+	const text = [
+		'Köszönjük az ajánlatkérést. Az ajánlat egy órán belül elkészül. Visszajelzünk e-mailben, amint elkészült.',
+		`Hivatkozási szám: ${q.id}.`,
+		`Időbélyeg: ${q.received_at}.`,
+		`Az állapotot itt követheted: ${statusUrl}`,
+		'',
+		'---',
+		'',
+		"Thank you for your quote request. Your indicative quote will be ready within an hour. We'll email you as soon as it's done.",
+		`Reference: ${q.id}.`,
+		`Received at: ${q.received_at}.`,
+		`Track your status: ${statusUrl}`,
+		'',
+		'— Áben Consulting'
+	].join('\n');
+	const html = [
+		'<div style="font:14px system-ui,sans-serif;color:#222;max-width:560px">',
+		'<h2 style="margin:0 0 16px;font:600 18px system-ui,sans-serif;color:#e8b84a">Áben Consulting</h2>',
+		'<p style="margin:0 0 8px">Köszönjük az ajánlatkérést. Az ajánlat egy órán belül elkészül. Visszajelzünk e-mailben, amint elkészült.</p>',
+		`<p style="margin:0 0 4px">Hivatkozási szám: <strong>${escapeHtml(q.id)}</strong>.</p>`,
+		`<p style="margin:0 0 16px">Időbélyeg: ${escapeHtml(q.received_at)}.</p>`,
+		`<p style="margin:0 0 24px"><a href="${escapeHtml(statusUrl)}" style="color:#e8b84a">Az állapotot itt követheted →</a></p>`,
+		'<hr style="border:none;border-top:1px solid #e0e0e0;margin:24px 0">',
+		'<p style="margin:0 0 8px">Thank you for your quote request. Your indicative quote will be ready within an hour. We\'ll email you as soon as it\'s done.</p>',
+		`<p style="margin:0 0 4px">Reference: <strong>${escapeHtml(q.id)}</strong>.</p>`,
+		`<p style="margin:0 0 16px">Received at: ${escapeHtml(q.received_at)}.</p>`,
+		`<p style="margin:0 0 24px"><a href="${escapeHtml(statusUrl)}" style="color:#e8b84a">Track your status →</a></p>`,
+		'<p style="margin:24px 0 0;color:#666">— Áben Consulting</p>',
+		'</div>'
+	].join('\n');
+	return { subject, text, html };
+}
+
+export interface SubmissionReceivedResult {
+	status: 'sent' | 'skipped' | 'failed';
+	audit_id?: string;
+	reason?: string;
+}
+
+/**
+ * Sends the bilingual "submission received, pricing in progress" email to the
+ * customer (with the operator CC'd so they get visibility without a dedicated
+ * relay call). Wired via fire-and-forget from /api/quote so the customer's
+ * 200 OK never blocks on the relay round-trip — per [[post-issue-async]] and
+ * ADR-0007 §"Negative", relay outcome cannot affect the persisted quote.
+ *
+ * Like the rest of the module: never throws. The handler still wraps the
+ * setImmediate body in a defensive `.catch` because contractual non-throwing
+ * is one bug away from being a memory of one.
+ */
+export async function sendSubmissionReceivedEmail(
+	q: QuoteMetadata
+): Promise<SubmissionReceivedResult> {
+	const cfg = readConfig();
+	if (!cfg) {
+		console.warn('[email] submission-received skipped: relay unconfigured');
+		return { status: 'skipped', reason: 'unconfigured' };
+	}
+	const customerEmail = headerSafe(q.contact.email);
+	if (!customerEmail) return { status: 'skipped', reason: 'no-recipient' };
+	if (!tryReserve(customerEmail, Date.now())) {
+		return { status: 'skipped', reason: 'rate-limited' };
+	}
+	const statusUrl = buildQuoteStatusUrl(q.id);
+	const msg = buildSubmissionReceivedEmail(q, statusUrl);
+	const res = await relaySendSafe({
+		to: [customerEmail],
+		cc: [cfg.operator],
+		subject: msg.subject,
+		body_text: msg.text,
+		body_html: msg.html
+	});
+	if (!res) return { status: 'failed', reason: 'relay-failed' };
+	return { status: 'sent', audit_id: res.audit_id };
+}
+
 // --- Priced-ready + accepted-confirmation templates ----------------------
 
 export function buildPricedReadyEmail(q: QuoteMetadata, acceptUrl: string): QuoteEmailContent {

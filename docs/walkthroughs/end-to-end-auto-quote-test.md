@@ -240,9 +240,11 @@ Click **Submit**.
 
 ### Step 2 — [Email inbox] Confirm the "submission received" email
 
-**[Email inbox]** Within ~60s, an email should arrive from the storefront. Subject in HU + EN. Body: "We received your CAD; pricing usually within a few minutes."
+**[Email inbox]** Within ~10s of submit, an email should arrive from the storefront. Subject: `Áben Consulting — Submission received, quote #<short-id>`. Body: bilingual HU + EN, "Köszönjük az ajánlatkérést / Thank you for your quote request — Your indicative quote will be ready within an hour." with a status-page link of the form `https://abenerp.com/q/<UUID>?t=<status-token>`.
 
-This email is sent by the existing PR-K send path, **now routed through the ABERP relay (ADR-0007)**. Its arrival is the first real validation that:
+This email is sent by the **PR-07 fire-and-forget path** in `/api/quote` (`sendSubmissionReceivedEmail`, ADR-0007 relay). The handler returns 200 immediately and queues the send via `setImmediate`, so a slow or broken relay never blocks the customer. **If it doesn't arrive, see Troubleshooting §"No email arrives" — but the customer still got their reference id on the confirmation page, so the rest of the walkthrough is unblocked.**
+
+Its arrival is the first real validation that:
 
 - The storefront's `email-relay.ts` reached `ABERP_INTERNAL_BASE_URL`.
 - ABERP's `/api/internal/send-email` accepted the bearer (`ABERP_EMAIL_RELAY_TOKEN` matched).
@@ -486,7 +488,7 @@ The following are real gaps surfaced by writing this walkthrough. None blocks th
 
 3. **Storefront → ABERP network topology in prod.** Today's `ABERP_INTERNAL_BASE_URL` likely points to `http://127.0.0.1:8080` (works only in local-dev when both processes share a host) or to a tunnel/VPN URL not yet specified. **Before the first real customer's quote, this topology needs a decision:** public TLS terminus on ABERP (with proper bearer hardening), Cloudflare Tunnel, Tailscale, or the "queue-and-let-ABERP-poll" fallback ADR-0007 §"Reconciliation with ADR-0006" sketched. **S299 will land an ADR comparing these four options.** Once that ADR closes, the "Local-dev test path (achievable today)" section above will be supplemented with a "Prod test path" section that mirrors today's LD-1..LD-5 sequence but against the chosen topology — and the prod-style Preflight 1..5 will be runnable without local-dev workarounds. See `[[email-send-path-pending]]`.
 
-4. **"Submission received" email path — does the storefront send one today?** Preflight Step 2 of the test path expects an email from the storefront within ~60s of submission. **If it doesn't arrive but the rest of the pipeline succeeds**, the storefront's `sendQuoteNotifications` hook may not yet be wired through the relay for the submission-received case (only the priced-quote-ready and accept-confirmed cases were the explicit PR-04 scope). Backlog: confirm the wiring or file as PR-06.
+4. ~~**"Submission received" email path — does the storefront send one today?**~~ **Shipped in PR-07 (S293).** `src/lib/server/email.ts` now exports `sendSubmissionReceivedEmail(q)` — a bilingual HU+EN template with the customer's signed status link. `/api/quote` fires it via `setImmediate` after the quote is persisted to disk, so the customer's 200 OK never blocks on the relay round-trip per `[[post-issue-async]]`. Failure paths (missing token, 503) log and swallow; the relay-side audit (`email.relayed_storefront`) is the source of truth ABERP-side. Step 2 above reflects the new shape.
 
 5. **Storefront `quoted → approved` flow into ABERP intake.** Step 8 of the test path assumes the existing ABERP polling daemon (which polls `GET /api/quotes?status=approved`) picks up the HMAC-accepted quote. **If it doesn't (e.g. the daemon is gated on a different status name like "accepted" rather than "approved", or it expects the legacy operator-driven approval shape), Step 8 hangs and the DEAL saga in Steps 9-11 can't run.** This is the most likely concrete backlog item out of this walkthrough — file as PR-06 if Step 8 fails.
 

@@ -37,9 +37,11 @@ import {
 	buildCustomerEmail,
 	buildPricedReadyEmail,
 	buildAcceptedConfirmationEmail,
+	buildSubmissionReceivedEmail,
 	sendQuoteNotifications,
 	sendPricedReadyEmail,
 	sendAcceptedConfirmationEmail,
+	sendSubmissionReceivedEmail,
 	buildAcceptUrl,
 	__resetRateLimit
 } from './email';
@@ -372,6 +374,59 @@ describe('sendPricedReadyEmail', () => {
 		fetchMock.mockImplementation(async () => new Response('', { status: 503 }));
 		const r = await sendPricedReadyEmail(pricedQuote());
 		expect(r.status).toBe('failed');
+	});
+});
+
+describe('buildSubmissionReceivedEmail', () => {
+	it('includes the bilingual HU + EN body, reference id, timestamp, and status link', () => {
+		const msg = buildSubmissionReceivedEmail(
+			makeQuote(),
+			'https://abenerp.com/q/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee?t=tok'
+		);
+		expect(msg.subject).toContain('Áben Consulting — Submission received, quote #aaaaaaaa');
+		expect(msg.text).toContain('Köszönjük az ajánlatkérést');
+		expect(msg.text).toContain('Thank you for your quote request');
+		expect(msg.text).toContain('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
+		expect(msg.text).toContain('2026-06-02T10:00:00.000Z');
+		expect(msg.text).toContain('https://abenerp.com/q/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee?t=tok');
+	});
+
+	it('html-escapes the status URL and reference id', () => {
+		const msg = buildSubmissionReceivedEmail(makeQuote(), 'https://abenerp.com/q/x?t=a&b=<script>');
+		expect(msg.html).toContain('&lt;script&gt;');
+		expect(msg.html).not.toContain('<script>');
+	});
+});
+
+describe('sendSubmissionReceivedEmail', () => {
+	it('returns skipped + unconfigured when the relay is not configured', async () => {
+		const r = await sendSubmissionReceivedEmail(makeQuote());
+		expect(r.status).toBe('skipped');
+		expect(r.reason).toBe('unconfigured');
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it('relays one bilingual email to the customer with the operator CC and returns audit_id', async () => {
+		configure();
+		const r = await sendSubmissionReceivedEmail(makeQuote());
+		expect(r.status).toBe('sent');
+		expect(r.audit_id).toBe('evt_ok');
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
+		expect(body.to).toEqual(['ada@example.com']);
+		expect(body.cc).toEqual(['ops@abenerp.com']);
+		expect(body.subject).toMatch(/Áben Consulting — Submission received, quote #/);
+		expect(body.body_text).toContain('Köszönjük az ajánlatkérést');
+		expect(body.body_text).toContain('Thank you for your quote request');
+		expect(body.body_text).toMatch(/\/q\/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\?t=/);
+	});
+
+	it('reports failure but does not throw when the relay returns 503', async () => {
+		configure();
+		fetchMock.mockImplementation(async () => new Response('', { status: 503 }));
+		const r = await sendSubmissionReceivedEmail(makeQuote());
+		expect(r.status).toBe('failed');
+		expect(r.reason).toBe('relay-failed');
 	});
 });
 
