@@ -9,7 +9,8 @@
 - [ADR-0003 — Material catalogue receiver (`PUT /api/catalogue/materials`)](../adr/0003-material-catalogue-receiver.md)
 - [ADR-0004 — Priced-quote writeback contract](../adr/0004-priced-quote-writeback.md)
 - [ADR-0005 — HMAC accept link with 30-day expiry](../adr/0005-hmac-accept-link-expiry.md)
-- [ADR-0006 — Local SMTP send (no internal email-relay endpoint)](../adr/0006-local-smtp-send-no-relay.md)
+- [ADR-0006 — Local SMTP send (no internal email-relay endpoint)](../adr/0006-local-smtp-send-no-relay.md) **(superseded by ADR-0007 on 2026-06-07)**
+- [ADR-0007 — Storefront customer email relays through ABERP](../adr/0007-storefront-email-relay-via-aberp.md) (filed S280, supersedes ADR-0006)
 
 **Sibling doc (the producer side):** [`ABERP/docs/design/auto-quoting-ground-zero.md`](../../../ABERP/docs/design/auto-quoting-ground-zero.md). The ABERP-side design closed S266–S275 at `PROD_v2.26.1` (DEAL saga, sticky `stock_alert`, material commit + sweep). This doc is the **storefront-side counterpart** — what the customer-facing layer has to be so the ABERP polling daemon and outbound push can drive end-to-end auto-quoting.
 
@@ -432,31 +433,34 @@ The `/quote` page's material dropdown (`src/routes/quote/+page.svelte:279`) **ad
 
 ---
 
-## 9. Customer email — pushback against the brief
+## 9. Customer email — relay through ABERP
 
-### The brief said
+> **Revised 2026-06-07 (S280, doc-only PR).** This section originally pinned local-SMTP-direct sends ([ADR-0006](../adr/0006-local-smtp-send-no-relay.md)). Field truth from Ervin mid-S277 ("the creds are there but would like to consolidate") changed the picture: two sender identities fragment SPF/DKIM/reputation. The architecture pins to **[ADR-0007](../adr/0007-storefront-email-relay-via-aberp.md) — relay through ABERP via `POST /api/internal/send-email`**. ADR-0006 is superseded, retained for audit trail. The text below reflects the post-revision design.
 
-> "SMTP via existing ABERP SPOC ([[aberp-smtp-spoc]]). Storefront cannot have its own SMTP creds; uses ABERP's via an internal email-send endpoint."
+### Consolidation rationale
 
-### The correction
+The S276 brief said "storefront uses ABERP's SMTP via an internal email-send endpoint." ADR-0006 pushed back on the _mechanism_ (correctly noting that the storefront already had SMTP creds locally per PR-K) and argued that `[[aberp-smtp-spoc]]` was satisfied by **value identity** — same `SMTP_USER` / `SMTP_PASS` on both surfaces. That reading was technically defensible but missed the spirit of SPOC: a single sender identity at the protocol level. Two surfaces sending as the same mailbox via two independently-rotated credential copies fragments **sender reputation**, **SPF/DKIM lineage**, and **audit trail** — exactly what SPOC was meant to prevent.
 
-Per `[[pushback-as-method]]`, the brief is wrong on the _mechanism_ and right on the _credential constraint_.
+Per `[[pushback-as-method]]`, pushback is method, not dogma. ADR-0006's pushback was thoughtful but proven wrong by deployment reality. ADR-0007 restores the original brief's architecture with the corrections that came out of the ADR-0006 analysis (the "no public inbound surface" claim was overstated — ABERP _is_ reachable on its own TLS endpoint for authenticated callers; what it doesn't expose is a _customer-facing_ surface).
 
-**Right:** "SMTP creds are SPOC" — there is one set of SMTP creds across all surfaces. Storefront uses the same `user`/`pass`/`from` as ABERP's invoice-mail path.
+### Mechanism (per ADR-0007)
 
-**Wrong:** "Storefront cannot have its own SMTP creds; uses ABERP's via an internal email-send endpoint."
+The storefront emits customer email via an HTTPS POST to ABERP:
 
-The storefront **already has the SMTP creds locally** (PR-K, `/etc/aberp-site.env`'s `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM`) and sends mail directly via `src/lib/server/email.ts:222` (`sendQuoteNotifications`). That code is on prod today. The SPOC rule is about **which mailbox the credentials authenticate as** (one), not about **which process holds them** (any number, as long as the credential value is identical).
+```
+POST /api/internal/send-email
+Authorization: Bearer <ABERP_EMAIL_RELAY_TOKEN>
+Body: { to, cc?, subject, body_text, body_html?, attachments? }
+Response: 200 { audit_id } | 401 | 413 | 503
+```
 
-Building an internal email-send endpoint on ABERP would mean:
+Single set of SMTP creds lives on ABERP (one SPF/DKIM, one rotation, one ledger). The storefront holds only `ABERP_EMAIL_RELAY_TOKEN` — distinct from `ABERP_QUOTE_INTAKE_TOKEN` so the two routes rotate independently. Every relay emits an `email.relayed_storefront` audit event on ABERP with recipient hashed (GDPR), subject, byte size, and the audit_id returned to the storefront for traceability.
 
-- The storefront POSTs to ABERP (we already established ABERP has **no public inbound surface** — `[[aberp-site-ssr-live]]` notes the architecture, ADR-0057 / ABERP-side §1 makes it a topology law).
-- The cleanest workaround is a _reverse_ polling loop where the storefront stages pending-emails and ABERP polls them and sends. That is **three round-trips** to send one mail. Inferior to today's direct send.
-- The new endpoint surface is itself a new attack vector and a new auth contract.
+When the relay path is unavailable (5xx, network), the storefront persists the request and surfaces a Sending/Queued state per `[[post-issue-async]]` rather than blocking the user — the PDF and metadata are already on disk under `/data/quotes/{id}/`, so the request can be reconstructed and retried.
 
-**The corrected mechanism for v1:** the storefront sends customer email directly via the local SMTP relay. `src/lib/server/email.ts` already does this. The new "your quote is priced" customer email is a new message in that same file (per ADR-0006), authored on the priced-writeback POST path. The "ABERP relay endpoint" idea is **rejected**, and `[[aberp-smtp-spoc]]` is preserved by keeping the credential values identical across surfaces (operator discipline — but it's already true today, the env var was populated from ABERP's keychain on Lightsail bootstrap).
+The `/etc/aberp-site.env` `SMTP_*` env vars on Lightsail are deprecated by PR-04 — the storefront's `email-send` helper is rewired to the relay path so those vars become unused. Operator removes them once a deploy or two have run cleanly.
 
-If/when SaaS migration (`[[aberp-saas-migration]]`) puts ABERP behind a public surface and a future audit requires "one process sends all mail," that's the moment to revisit. **Pin in ADR-0006.**
+See ADR-0007 for the full wire contract, auth model, audit shape, open questions (queue-on-failure policy, rate-limit posture, attachment size caps), and the reconciliation with ADR-0006.
 
 ### What the storefront sends
 
@@ -510,7 +514,7 @@ Each slice is ~1 PR per `[[overnight-batch-style]]`, ground-up against this doc.
 - New routes: `GET /q/{id}/accept?ts=&sig=` (the customer-facing confirm landing), `POST /q/{id}/accept` (the single-use commit).
 - Customer accept-confirm page UI — **big, loud, single-use, with a typed confirmation pattern** (addendum 3 customer analog: same energy as ABERP DEAL token + storno confirm). Customer types `ACCEPT` (or clicks a deliberately oversized confirm button — pick one in design, brief should choose the typed variant for `[[hulye-biztos]]` parity).
 - 409 on replayed accept.
-- Customer email send on priced-writeback (the "your quote is ready" message, with attached PDF).
+- Customer email send on priced-writeback (the "your quote is ready" message, with attached PDF) — via the ABERP relay path per ADR-0007 (NOT local SMTP — ADR-0006 superseded). Includes the storefront-side `email-send` helper rewire and the deprecation of the `/etc/aberp-site.env` `SMTP_*` vars.
 - `quoted → rejected` daemon sweep on `valid_until` lapse (lightweight: a cron-style sweep on next-poll-fired, since the storefront doesn't run its own scheduler today — or a setInterval in the Node process on boot).
 - Tests: token sign/verify with expiry, expiry-past returns 403, single-use, accept flips state, replay returns 409, expiry-sweep flips `quoted → rejected`.
 
@@ -693,7 +697,8 @@ Items where a real call is needed but not blocking for the design pin. Each one 
 - `[[aberp-quoting-design-addenda]]` — three mandatory addenda; addenda 2 + 3 enforced on this side.
 - `[[aberp-site-ssr-live]]` — the runtime substrate this design assumes (Lightsail, CloudFront, `/etc/aberp-site.env`).
 - `[[aberp-site-cad-validation]]` — PR-P shipped content-sniff at intake; this design assumes it; open follow-up Q#6.
-- `[[aberp-smtp-spoc]]` — credential-SPOC rule; pushback in §9 + ADR-0006 clarifies it is about credentials not architecture.
+- `[[aberp-smtp-spoc]]` — credential-SPOC rule; §9 + ADR-0007 enforce it architecturally (single sender identity on ABERP), reversing the §9-as-of-2026-06-06 / ADR-0006 reading that "values-not-locality" was sufficient.
+- `project_aberp_site_smtp_broken.md` — field truth (Ervin mid-S277) that triggered ADR-0006 → ADR-0007 reversal; consolidation, not outbound-port-25-block, was the real ask.
 - `[[trust-code-not-operator]]` — invariants in code; the state machine §5 enforces in TS, not in FS.
 - `[[hulye-biztos]]` — accept-confirm UX is the customer DEAL moment.
 - `[[no-sql-specific]]` — no DB; filesystem JSON.

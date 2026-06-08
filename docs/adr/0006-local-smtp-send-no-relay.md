@@ -1,6 +1,10 @@
 # ADR 0006 — Local SMTP send (no internal email-relay endpoint)
 
-**Status:** Accepted (2026-06-06, S276 / PR-01). Pushback against the S276 brief's "via internal email-send endpoint" premise.
+> **SUPERSEDED by [ADR-0007](0007-storefront-email-relay-via-aberp.md) on 2026-06-07.**
+>
+> The reasoning below was technically defensible (storefront process has credentials, SPOC is creds-not-locality), but field truth changed the picture: maintaining two sender identities fragments SPF/DKIM/reputation. See ADR-0007 for the consolidation decision.
+
+**Status:** Superseded by [ADR-0007](0007-storefront-email-relay-via-aberp.md) (2026-06-07, S280). Originally accepted (2026-06-06, S276 / PR-01) as a pushback against the S276 brief's "via internal email-send endpoint" premise.
 **Design doc:** [`docs/design/storefront-auto-quote-pipeline.md`](../design/storefront-auto-quote-pipeline.md) §9.
 
 ## Context
