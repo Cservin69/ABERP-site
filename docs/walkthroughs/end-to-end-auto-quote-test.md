@@ -270,9 +270,9 @@ This email is sent by the **PR-07 fire-and-forget path** in `/api/quote`, rewire
 
 Its arrival is the first real validation that:
 
-- The storefront persisted a queue entry under `/var/lib/aberp-site/email-outbox/queued/<ulid>.json`.
+- The storefront persisted a queue entry under `/home/aberp/data/email-outbox/queued/<ulid>.json`.
 - ABERP's poller hit `GET /api/internal/email-queue` with `ABERP_SITE_ADMIN_TOKEN`, claimed the entry via `POST /api/internal/email-queue/{id}/claim`, sent it, and reported back via `POST /api/internal/email-queue/{id}/sent`.
-- ABERP's downstream SMTP delivered the message and the entry now lives in `/var/lib/aberp-site/email-outbox/sent/<ulid>.json` with `audit_id` populated.
+- ABERP's downstream SMTP delivered the message and the entry now lives in `/home/aberp/data/email-outbox/sent/<ulid>.json` with `audit_id` populated.
 
 **Verify:** the email is in your inbox within 5 minutes. The body contains a "view your quote status" link of the form `https://abenerp.com/q/<UUID>?t=<status-token>`.
 
@@ -481,7 +481,7 @@ For each predictable failure mode: symptom Ervin sees, WHERE to look first, and 
 
 Under ADR-0009 (PR-11) the storefront enqueues every email to disk; ABERP's poller picks them up. Diagnose in two stages:
 
-- **WHERE first (storefront):** **[Browser SSH]** `sudo ls -1 /var/lib/aberp-site/email-outbox/queued/ /var/lib/aberp-site/email-outbox/claimed/ /var/lib/aberp-site/email-outbox/sent/ /var/lib/aberp-site/email-outbox/failed/`.
+- **WHERE first (storefront):** **[Browser SSH]** `sudo ls -1 /home/aberp/data/email-outbox/queued/ /home/aberp/data/email-outbox/claimed/ /home/aberp/data/email-outbox/sent/ /home/aberp/data/email-outbox/failed/`.
   - If the entry sits in **`queued/`** longer than one poll cycle, ABERP's poller is not running. Open ABERP → Settings → Quote Intake → "last cycle" timestamp; restart the daemon if stale.
   - If the entry is in **`claimed/`** with no terminal transition past 10 minutes, the storefront's stale-claim sweep will auto-recover it on the next `listQueued` — see "Outbox claimed-but-stuck" below for the TTL knob. No manual intervention required.
   - If the entry is in **`failed/`**, open it: `last_error.class` + `last_error.detail` name the ABERP-side cause (SMTP 5xx, recipient blocked, etc.).
@@ -492,7 +492,7 @@ Under ADR-0009 (PR-11) the storefront enqueues every email to disk; ABERP's poll
 
 ### Outbox claimed-but-stuck (ABERP claimed, never reported back)
 
-- **Symptom:** an entry sits in `/var/lib/aberp-site/email-outbox/claimed/<ulid>.json` past one full poll cycle (= 5s+ in prod, 60s+ in local-dev).
+- **Symptom:** an entry sits in `/home/aberp/data/email-outbox/claimed/<ulid>.json` past one full poll cycle (= 5s+ in prod, 60s+ in local-dev).
 - **WHERE:** ABERP — the daemon claimed the entry but crashed (or its `/sent` writeback POST failed) before reaching a terminal state. The storefront's automatic stale-claim sweep (S311 / F1) runs on every `listQueued` and atomically renames any claimed entry whose `claimed_at` is older than `ABERP_SITE_EMAIL_OUTBOX_STALE_CLAIM_TTL_SECS` (default 600s = 10 min) back to `queued/`. ABERP's next poll then re-claims and re-sends. Duplicate-send risk is accepted per ADR-0009 Consequences §3.
 - **Fix:** **wait one TTL window.** No manual recovery needed. If an entry sits stuck past 15 min after a restart, audit it via ABERP → Audit ledger filter `quote.email_outbox_` and investigate the SMTP path (most likely auth/relay issue, surfaced by a `quote.email_outbox_failed` row on the eventual cycle).
 - **Tuning:** to recover faster during a local-dev session, set `ABERP_SITE_EMAIL_OUTBOX_STALE_CLAIM_TTL_SECS=30` on the storefront process.

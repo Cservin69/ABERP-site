@@ -39,14 +39,20 @@ import { join, resolve as pathResolve } from 'node:path';
  */
 
 /**
- * Canonical queue root. ADR-0009 specifies `/var/lib/aberp-site/email-outbox/`
- * as the systemd-tmpfiles-friendly path; the env var lets the operator point
- * elsewhere (e.g. tests, ephemeral local-dev). The S311 sweep aligns the
- * code default with ADR-0009 and the walkthrough — pre-S311 the default was
- * `./data/email-outbox`, process-CWD-relative, which would silently land on
- * a deploy-volatile volume.
+ * Canonical queue root. ADR-0009's text named `/var/lib/aberp-site/email-outbox/`
+ * but the live Lightsail deployment never had that path — `bin/lightsail-bootstrap.sh`
+ * creates `/home/aberp/data/` (symlinked to the EBS mountpoint `/mnt/aberp-data`)
+ * and `docs/aws/aberp-site.service` only whitelists `/home/aberp/data` and
+ * `/mnt/aberp-data` under `ReadWritePaths=` (the unit has
+ * `ProtectSystem=strict`, so `/var/lib/` is read-only at runtime). The S311
+ * default matches the existing working `ABERP_SITE_QUOTE_DIR=/home/aberp/data/quotes`
+ * pattern so a fresh deploy passes the F15 boot-check without unit-file
+ * edits. ADR-0009's text is targeted for amendment in a doc-only follow-up.
+ *
+ * Pre-S311 the default was `./data/email-outbox`, process-CWD-relative,
+ * which would silently land on the deploy-volatile application volume.
  */
-const OUTBOX_DIR_DEFAULT = '/var/lib/aberp-site/email-outbox';
+const OUTBOX_DIR_DEFAULT = '/home/aberp/data/email-outbox';
 const OUTBOX_DIR = process.env.ABERP_SITE_EMAIL_OUTBOX_DIR ?? OUTBOX_DIR_DEFAULT;
 
 /**

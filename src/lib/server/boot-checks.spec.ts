@@ -23,7 +23,7 @@ import { join } from 'node:path';
 const PROD_ENV = {
 	BODY_SIZE_LIMIT: String(EXPECTED_BODY_SIZE_LIMIT),
 	ABERP_SITE_OPERATOR_EMAIL: 'ops@abenerp.com',
-	ABERP_SITE_EMAIL_OUTBOX_DIR: '/var/lib/aberp-site/email-outbox'
+	ABERP_SITE_EMAIL_OUTBOX_DIR: '/home/aberp/data/email-outbox'
 };
 const OK_PROBE = (): OutboxDirProbeResult => ({ ok: true });
 
@@ -111,7 +111,7 @@ describe('runBootChecks — F15 outbox dir writability', () => {
 		const f15 = v.problems.find((p) => p.finding === 'F15');
 		expect(f15).toBeDefined();
 		expect(f15?.message).toContain('EACCES');
-		expect(f15?.message).toContain('/var/lib/aberp-site/email-outbox');
+		expect(f15?.message).toContain('/home/aberp/data/email-outbox');
 	});
 
 	it('flags F15 when ABERP_SITE_EMAIL_OUTBOX_DIR is a relative path', () => {
@@ -142,7 +142,7 @@ describe('runBootChecks — F15 outbox dir writability', () => {
 				return { ok: true };
 			}
 		});
-		expect(seenDir).toBe('/var/lib/aberp-site/email-outbox');
+		expect(seenDir).toBe('/home/aberp/data/email-outbox');
 	});
 });
 

@@ -36,11 +36,13 @@ import { OUTBOX_DIR_DEFAULT_PATH } from './email-outbox';
  * path `./data/email-outbox` (process-CWD-dependent), and the env var was
  * never boot-checked. A Lightsail systemd unit that forgot to set
  * `ABERP_SITE_EMAIL_OUTBOX_DIR` would silently write the queue to the
- * application volume, which gets wiped on every deploy. F15 widens the
- * canonical default to ADR-0009's `/var/lib/aberp-site/email-outbox` AND
+ * application volume, which gets wiped on every deploy. F15 sets the
+ * canonical default to `/home/aberp/data/email-outbox` (matches the
+ * existing `ABERP_SITE_QUOTE_DIR` pattern that bootstrap creates and
+ * that the systemd unit's `ReadWritePaths=` whitelist allows) AND
  * requires that the directory exists, is absolute, and is writable. The
- * check creates a sentinel `.boot-check-<uuid>` file and removes it before
- * returning; the round-trip is what actually proves writability.
+ * check creates a sentinel `.boot-check-<uuid>` file and removes it
+ * before returning; the round-trip is what actually proves writability.
  *
  * The checks are skipped under vitest (`VITEST=true`) so the test suite can
  * import server modules without setting every prod env.
