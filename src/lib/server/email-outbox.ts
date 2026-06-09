@@ -24,9 +24,49 @@ import { join, resolve as pathResolve } from 'node:path';
  * only callers of `listQueued` / `claimEntry` / `markSent` / `markFailed`. The
  * three storefront call sites (submission-received, priced-ready,
  * accept-confirmation) only call `enqueueEmail`.
+ *
+ * ## S311 stale-claim auto-recovery (F1)
+ *
+ * If a daemon crashes after claiming but before posting `/sent` or `/failed`,
+ * the entry would sit in `claimed/` forever — the daemon's next cycle only
+ * scans `queued/`. S311 closes that wedge: every `listQueued` call first
+ * sweeps `claimed/` and atomically renames any entry whose `claimed_at` is
+ * older than `CLAIM_TTL_SECS` back to `queued/`. The daemon then re-claims it
+ * on the same cycle. Duplicate-send risk is the trade-off (per ADR-0009
+ * Consequences §3): a daemon that succeeded at SMTP but failed at writeback
+ * `/sent` will re-send the email N minutes later. Acceptable given the
+ * single-digit-emails-per-day pilot volume.
  */
 
-const OUTBOX_DIR = process.env.ABERP_SITE_EMAIL_OUTBOX_DIR ?? './data/email-outbox';
+/**
+ * Canonical queue root. ADR-0009 specifies `/var/lib/aberp-site/email-outbox/`
+ * as the systemd-tmpfiles-friendly path; the env var lets the operator point
+ * elsewhere (e.g. tests, ephemeral local-dev). The S311 sweep aligns the
+ * code default with ADR-0009 and the walkthrough — pre-S311 the default was
+ * `./data/email-outbox`, process-CWD-relative, which would silently land on
+ * a deploy-volatile volume.
+ */
+const OUTBOX_DIR_DEFAULT = '/var/lib/aberp-site/email-outbox';
+const OUTBOX_DIR = process.env.ABERP_SITE_EMAIL_OUTBOX_DIR ?? OUTBOX_DIR_DEFAULT;
+
+/**
+ * Stale-claim TTL. Entries in `claimed/` older than this are renamed back to
+ * `queued/` on the next listQueued call. 10 minutes is conservative: shorter
+ * windows would race active SMTP sends (lettre's default connect+send budget
+ * is well under a minute, but greylisted MX retries can stretch); longer
+ * windows would leave wedged entries hidden from the operator longer than
+ * tolerable for the pilot.
+ */
+const CLAIM_TTL_SECS_DEFAULT = 600;
+const CLAIM_TTL_SECS_ENV = 'ABERP_SITE_EMAIL_OUTBOX_STALE_CLAIM_TTL_SECS';
+
+function resolveClaimTtlSecs(): number {
+	const raw = process.env[CLAIM_TTL_SECS_ENV];
+	if (!raw) return CLAIM_TTL_SECS_DEFAULT;
+	const n = Number.parseInt(raw, 10);
+	if (!Number.isFinite(n) || n < 1 || n > 86_400) return CLAIM_TTL_SECS_DEFAULT;
+	return n;
+}
 
 const STATES = ['queued', 'claimed', 'sent', 'failed'] as const;
 export type EmailQueueState = (typeof STATES)[number];
@@ -67,6 +107,14 @@ export interface EmailQueueEntry {
 	last_error: { class: string; detail: string } | null;
 	sent_at: string | null;
 	audit_id: string | null;
+	/**
+	 * ISO timestamp of the most recent `queued → claimed` transition. Null on
+	 * entries written before S311 landed; the stale-claim sweep treats a null
+	 * `claimed_at` on an entry in `claimed/` as "always stale" so pre-existing
+	 * wedged entries recover on the next list. NOT cleared on subsequent
+	 * states — stays as a forensic record of when the (last) claim happened.
+	 */
+	claimed_at?: string | null;
 }
 
 /**
@@ -190,7 +238,8 @@ export async function enqueueEmail(
 		attempt_n: 0,
 		last_error: null,
 		sent_at: null,
-		audit_id: null
+		audit_id: null,
+		claimed_at: null
 	};
 	await writeEntryAtomic('queued', entry);
 	return { id };
@@ -203,6 +252,63 @@ export interface ListQueuedOptions {
 	after?: string;
 	/** Max entries to return. Defaults to 50. Clamped to 200. */
 	limit?: number;
+	/**
+	 * Skip the stale-claim sweep. Tests use this so they can assert pre-sweep
+	 * state; production callers should leave unset (default behavior is to
+	 * sweep on every list, which is how F1 stays closed). Not exposed on the
+	 * HTTP endpoint.
+	 */
+	skipStaleClaimSweep?: boolean;
+	/** Override for tests: explicit "now" in ms-since-epoch. */
+	nowMs?: number;
+}
+
+/**
+ * Sweep `claimed/` for entries whose `claimed_at` is older than
+ * `CLAIM_TTL_SECS`, atomically renaming each back to `queued/`. Returns the
+ * ids that were recovered so callers (= listQueued's auto-sweep, the
+ * integration test) can log/inspect them. Each individual recovery is a
+ * single POSIX rename; if two callers race on the same id, exactly one wins
+ * and the other gets ENOENT silently.
+ *
+ * Entries with `claimed_at: null` are treated as "always stale" — those are
+ * pre-S311 rows that pre-date the field. The next claim populates
+ * `claimed_at` for any subsequent sweep.
+ */
+export async function recoverStaleClaimed(opts: { nowMs?: number } = {}): Promise<string[]> {
+	await ensureDirs();
+	let names: string[];
+	try {
+		names = await readdir(stateDir('claimed'));
+	} catch {
+		return [];
+	}
+	const ids = names
+		.filter((n) => n.endsWith('.json'))
+		.map((n) => n.slice(0, -'.json'.length))
+		.filter((id) => isValidEntryId(id));
+	if (ids.length === 0) return [];
+
+	const ttlMs = resolveClaimTtlSecs() * 1000;
+	const now = opts.nowMs ?? Date.now();
+	const cutoff = now - ttlMs;
+	const recovered: string[] = [];
+	for (const id of ids) {
+		const entry = await readEntryFromState('claimed', id);
+		if (!entry) continue;
+		const claimedAtMs = entry.claimed_at ? Date.parse(entry.claimed_at) : 0;
+		// Null / unparseable / before cutoff → stale; recover.
+		if (Number.isFinite(claimedAtMs) && claimedAtMs > cutoff) continue;
+		try {
+			await rename(entryPath('claimed', id), entryPath('queued', id));
+			recovered.push(id);
+		} catch {
+			// ENOENT (raced with another claimer) or EXDEV (mount-crossing —
+			// shouldn't happen because both dirs are siblings). Skip silently;
+			// the next sweep will pick it up if it's still stale.
+		}
+	}
+	return recovered;
 }
 
 /**
@@ -210,14 +316,17 @@ export interface ListQueuedOptions {
  * ULID prefixes are time). Filters by `since` (ISO timestamp) and `after`
  * (entry-id cursor) if either is provided.
  *
- * Reads the `queued/` directory only — does NOT scan claimed/sent/failed.
- * A polled ABERP that wants visibility into in-flight entries calls the
- * dedicated state endpoints (none ship in v1, by design — the queue is
- * the source-of-truth ABERP needs; sent/failed are operator-debug surfaces).
+ * Before scanning `queued/`, runs the F1 stale-claim sweep (see
+ * `recoverStaleClaimed`) so a daemon crash mid-cycle does not wedge an entry
+ * in `claimed/` forever. The sweep is idempotent and cheap (1 readdir + per-
+ * file stat-via-readFile) so we tolerate running it on every list.
  */
 export async function listQueued(opts: ListQueuedOptions = {}): Promise<EmailQueueEntry[]> {
 	const limit = Math.min(opts.limit ?? 50, 200);
 	await ensureDirs();
+	if (!opts.skipStaleClaimSweep) {
+		await recoverStaleClaimed({ nowMs: opts.nowMs });
+	}
 	let names: string[];
 	try {
 		names = await readdir(stateDir('queued'));
@@ -244,9 +353,9 @@ export async function listQueued(opts: ListQueuedOptions = {}): Promise<EmailQue
 
 /**
  * Atomically move an entry `queued → claimed`. Returns the entry (with
- * `attempt_n` bumped and `state='claimed'`) on success, null if the entry is
- * not in `queued/` (either already claimed, already terminal, or never
- * existed).
+ * `attempt_n` bumped, `state='claimed'`, and `claimed_at` set to the current
+ * ISO timestamp) on success, null if the entry is not in `queued/` (either
+ * already claimed, already terminal, or never existed).
  *
  * The atomicity guarantee comes from filesystem `rename`: under POSIX, a
  * rename from path A to path B is atomic within a mountpoint, so two
@@ -254,6 +363,10 @@ export async function listQueued(opts: ListQueuedOptions = {}): Promise<EmailQue
  * `null` back from the post-rename re-read. Within v1's single-ABERP-instance
  * topology this is overkill; under the eventual SaaS topology it's the
  * load-bearing invariant.
+ *
+ * The `claimed_at` field is what the S311 stale-claim sweep uses to identify
+ * wedged entries — a second claim on a recovered entry overwrites the field
+ * with the new claim time, so the sweep clock resets per-claim.
  */
 export async function claimEntry(id: string): Promise<EmailQueueEntry | null> {
 	if (!isValidEntryId(id)) return null;
@@ -270,7 +383,8 @@ export async function claimEntry(id: string): Promise<EmailQueueEntry | null> {
 	const updated: EmailQueueEntry = {
 		...entry,
 		state: 'claimed',
-		attempt_n: entry.attempt_n + 1
+		attempt_n: entry.attempt_n + 1,
+		claimed_at: new Date().toISOString()
 	};
 	await writeEntryAtomic('claimed', updated);
 	return updated;
@@ -373,3 +487,11 @@ export function isValidIsoTimestamp(v: string): boolean {
 	const ms = Date.parse(v);
 	return Number.isFinite(ms);
 }
+
+/** Exported for boot-checks to verify the resolved path matches the env. */
+export function __resolvedOutboxDir(): string {
+	return queueRoot();
+}
+
+/** Exported so boot-checks can mention the canonical default in error copy. */
+export const OUTBOX_DIR_DEFAULT_PATH = OUTBOX_DIR_DEFAULT;

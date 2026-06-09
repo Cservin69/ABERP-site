@@ -87,6 +87,7 @@ describe('enqueueEmail', () => {
 		expect(entry?.last_error).toBeNull();
 		expect(entry?.sent_at).toBeNull();
 		expect(entry?.audit_id).toBeNull();
+		expect(entry?.claimed_at).toBeNull();
 		// And the file landed in queued/.
 		const queued = readdirSync(join(TMP_ROOT, 'queued'));
 		expect(queued).toContain(`${id}.json`);
@@ -165,13 +166,19 @@ describe('listQueued', () => {
 });
 
 describe('claimEntry', () => {
-	it('atomically moves queued → claimed and bumps attempt_n', async () => {
+	it('atomically moves queued → claimed, bumps attempt_n, and stamps claimed_at', async () => {
 		const { enqueueEmail, claimEntry } = await loadOutbox();
 		const { id } = await enqueueEmail(basePayload(), 'submission_received');
+		const before = Date.now();
 		const claimed = await claimEntry(id);
+		const after = Date.now();
 		expect(claimed).not.toBeNull();
 		expect(claimed?.state).toBe('claimed');
 		expect(claimed?.attempt_n).toBe(1);
+		expect(claimed?.claimed_at).toBeTruthy();
+		const claimedAtMs = Date.parse(claimed!.claimed_at as string);
+		expect(claimedAtMs).toBeGreaterThanOrEqual(before);
+		expect(claimedAtMs).toBeLessThanOrEqual(after);
 		// The file lives in claimed/ now.
 		expect(readdirSync(join(TMP_ROOT, 'queued'))).not.toContain(`${id}.json`);
 		expect(readdirSync(join(TMP_ROOT, 'claimed'))).toContain(`${id}.json`);
@@ -317,6 +324,90 @@ describe('atomic-write safety', () => {
 		const list = await listQueued();
 		// The one good entry still shows up; the malformed one is silently dropped.
 		expect(list.length).toBe(1);
+	});
+});
+
+describe('recoverStaleClaimed (S311 F1)', () => {
+	it('returns [] when claimed/ is empty', async () => {
+		const { recoverStaleClaimed } = await loadOutbox();
+		const recovered = await recoverStaleClaimed();
+		expect(recovered).toEqual([]);
+	});
+
+	it('does NOT recover a fresh claim (claimed_at within the TTL)', async () => {
+		const { enqueueEmail, claimEntry, recoverStaleClaimed } = await loadOutbox();
+		const { id } = await enqueueEmail(basePayload(), 'submission_received');
+		await claimEntry(id);
+		// nowMs == real-now keeps the entry well within the default 600s TTL.
+		const recovered = await recoverStaleClaimed({ nowMs: Date.now() });
+		expect(recovered).toEqual([]);
+		// Still in claimed/.
+		expect(readdirSync(join(TMP_ROOT, 'claimed'))).toContain(`${id}.json`);
+	});
+
+	it('recovers a claim whose claimed_at is older than the TTL', async () => {
+		const { enqueueEmail, claimEntry, recoverStaleClaimed } = await loadOutbox();
+		const { id } = await enqueueEmail(basePayload(), 'submission_received');
+		await claimEntry(id);
+		// Fast-forward "now" by 1 hour — well past the 600s default TTL.
+		const futureNow = Date.now() + 60 * 60 * 1000;
+		const recovered = await recoverStaleClaimed({ nowMs: futureNow });
+		expect(recovered).toEqual([id]);
+		expect(readdirSync(join(TMP_ROOT, 'queued'))).toContain(`${id}.json`);
+		expect(readdirSync(join(TMP_ROOT, 'claimed'))).not.toContain(`${id}.json`);
+	});
+
+	it('treats claimed_at == null as "always stale" (covers pre-S311 wedged rows)', async () => {
+		// Write a claimed entry directly with claimed_at = null. This is the
+		// shape an entry would have on disk if it pre-dates the S311 field.
+		const { enqueueEmail, recoverStaleClaimed, generateUlid, isValidEntryId } = await loadOutbox();
+		void isValidEntryId;
+		await enqueueEmail(basePayload(), 'submission_received'); // ensures dirs
+		const id = generateUlid();
+		const legacy = {
+			id,
+			queued_at: '2026-06-01T00:00:00Z',
+			to: ['x@x.com'],
+			cc: [],
+			subject: 's',
+			body_text: 't',
+			submitter: 'submission_received',
+			state: 'claimed',
+			attempt_n: 1,
+			last_error: null,
+			sent_at: null,
+			audit_id: null,
+			claimed_at: null
+		};
+		writeFileSync(join(TMP_ROOT, 'claimed', `${id}.json`), JSON.stringify(legacy));
+		const recovered = await recoverStaleClaimed({ nowMs: Date.now() });
+		expect(recovered).toContain(id);
+		expect(readdirSync(join(TMP_ROOT, 'queued'))).toContain(`${id}.json`);
+	});
+});
+
+describe('listQueued — F1 auto-sweep', () => {
+	it('auto-recovers stale-claimed entries on every list (no skipStaleClaimSweep)', async () => {
+		const { enqueueEmail, claimEntry, listQueued } = await loadOutbox();
+		const { id } = await enqueueEmail(basePayload(), 'submission_received');
+		await claimEntry(id);
+		// 1 hour future → past TTL → list sweeps + returns the recovered row.
+		const list = await listQueued({ nowMs: Date.now() + 60 * 60 * 1000 });
+		expect(list.map((e) => e.id)).toContain(id);
+		expect(readdirSync(join(TMP_ROOT, 'queued'))).toContain(`${id}.json`);
+		expect(readdirSync(join(TMP_ROOT, 'claimed'))).not.toContain(`${id}.json`);
+	});
+
+	it('skipStaleClaimSweep=true bypasses the sweep (used by tests that want pre-sweep state)', async () => {
+		const { enqueueEmail, claimEntry, listQueued } = await loadOutbox();
+		const { id } = await enqueueEmail(basePayload(), 'submission_received');
+		await claimEntry(id);
+		const list = await listQueued({
+			nowMs: Date.now() + 60 * 60 * 1000,
+			skipStaleClaimSweep: true
+		});
+		expect(list.map((e) => e.id)).not.toContain(id);
+		expect(readdirSync(join(TMP_ROOT, 'claimed'))).toContain(`${id}.json`);
 	});
 });
 

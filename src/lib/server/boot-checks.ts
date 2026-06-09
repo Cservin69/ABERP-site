@@ -1,4 +1,14 @@
+import {
+	mkdirSync,
+	accessSync,
+	writeFileSync,
+	unlinkSync,
+	constants as fsConstants
+} from 'node:fs';
+import { isAbsolute, join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { verifyBodySizeLimit } from './body-size-limit';
+import { OUTBOX_DIR_DEFAULT_PATH } from './email-outbox';
 
 /**
  * Refuse-to-start boot checks. The S285 review flagged two
@@ -20,6 +30,18 @@ import { verifyBodySizeLimit } from './body-size-limit';
  * BODY_SIZE_LIMIT and relay checks to a fail-on-start; PR-11 narrows F8 to
  * `ABERP_SITE_OPERATOR_EMAIL` only.
  *
+ * ## S311 / F15 — outbox dir writability
+ *
+ * The S309 review found that `email-outbox.ts` defaulted to the relative
+ * path `./data/email-outbox` (process-CWD-dependent), and the env var was
+ * never boot-checked. A Lightsail systemd unit that forgot to set
+ * `ABERP_SITE_EMAIL_OUTBOX_DIR` would silently write the queue to the
+ * application volume, which gets wiped on every deploy. F15 widens the
+ * canonical default to ADR-0009's `/var/lib/aberp-site/email-outbox` AND
+ * requires that the directory exists, is absolute, and is writable. The
+ * check creates a sentinel `.boot-check-<uuid>` file and removes it before
+ * returning; the round-trip is what actually proves writability.
+ *
  * The checks are skipped under vitest (`VITEST=true`) so the test suite can
  * import server modules without setting every prod env.
  */
@@ -39,8 +61,17 @@ interface BootCheckOptions {
 	env?: Partial<{
 		BODY_SIZE_LIMIT: string;
 		ABERP_SITE_OPERATOR_EMAIL: string;
+		ABERP_SITE_EMAIL_OUTBOX_DIR: string;
 	}>;
+	/**
+	 * Override the outbox-dir writability probe — tests stub this so they can
+	 * assert "F15 fires when the dir is unwritable" without needing real
+	 * chmod-444 tmpdirs (which behave inconsistently across CI runners).
+	 */
+	outboxDirProbe?: (dir: string) => OutboxDirProbeResult;
 }
+
+export type OutboxDirProbeResult = { ok: true } | { ok: false; reason: string };
 
 function isPresent(v: string | undefined | null): boolean {
 	return typeof v === 'string' && v.trim().length > 0;
@@ -62,6 +93,63 @@ function checkOperatorInbox(env: BootCheckOptions['env']): BootCheckProblem | nu
 }
 
 /**
+ * Verify the outbox directory is absolute, exists (or is creatable), and is
+ * writable. Sync because `runBootChecks` is sync; the round-trip is a few
+ * inode operations on a healthy box, < 1 ms.
+ */
+export function probeOutboxDirSync(dir: string): OutboxDirProbeResult {
+	if (!isAbsolute(dir)) {
+		return {
+			ok: false,
+			reason:
+				`path is not absolute (got "${dir}"); a process-CWD-relative path ` +
+				'silently lands on the deploy-volatile application volume.'
+		};
+	}
+	try {
+		mkdirSync(dir, { recursive: true });
+	} catch (e) {
+		return { ok: false, reason: `mkdir failed: ${(e as Error).message}` };
+	}
+	try {
+		accessSync(dir, fsConstants.W_OK);
+	} catch (e) {
+		return { ok: false, reason: `access W_OK failed: ${(e as Error).message}` };
+	}
+	const sentinel = join(dir, `.boot-check-${randomUUID()}`);
+	try {
+		writeFileSync(sentinel, 'ok', 'utf8');
+		unlinkSync(sentinel);
+	} catch (e) {
+		return { ok: false, reason: `sentinel write/unlink failed: ${(e as Error).message}` };
+	}
+	return { ok: true };
+}
+
+function checkOutboxDir(
+	env: BootCheckOptions['env'],
+	probe: BootCheckOptions['outboxDirProbe']
+): BootCheckProblem | null {
+	const raw =
+		env?.ABERP_SITE_EMAIL_OUTBOX_DIR ??
+		process.env.ABERP_SITE_EMAIL_OUTBOX_DIR ??
+		OUTBOX_DIR_DEFAULT_PATH;
+	const probeFn = probe ?? probeOutboxDirSync;
+	const result = probeFn(raw);
+	if (result.ok) return null;
+	return {
+		finding: 'F15',
+		message:
+			`[aberp-site] ABERP_SITE_EMAIL_OUTBOX_DIR="${raw}" is not usable: ` +
+			`${result.reason}. ` +
+			`Set it to ${OUTBOX_DIR_DEFAULT_PATH} (the ADR-0009 canonical path) and ` +
+			`make sure the systemd unit's StateDirectory or tmpfiles.d entry creates ` +
+			`the directory writable by the aberp-site user. ` +
+			`See docs/reviews/S309-adversarial-option-d-arc.md finding F15.`
+	};
+}
+
+/**
  * Pure verification — does not throw or exit. Returns a verdict the caller
  * (hooks.server.ts) decides what to do with.
  */
@@ -75,6 +163,9 @@ export function runBootChecks(opts: BootCheckOptions = {}): BootCheckResult {
 
 	const inboxProblem = checkOperatorInbox(opts.env);
 	if (inboxProblem) problems.push(inboxProblem);
+
+	const outboxProblem = checkOutboxDir(opts.env, opts.outboxDirProbe);
+	if (outboxProblem) problems.push(outboxProblem);
 
 	return { ok: problems.length === 0, problems };
 }
