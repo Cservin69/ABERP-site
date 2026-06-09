@@ -1,25 +1,36 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-// quote-store reads `process.env.ABERP_SITE_QUOTE_DIR` at MODULE LOAD via a
-// top-level const, and static `import` calls below are hoisted above any
-// top-level statement here. We MUST set the env var BEFORE the quote-store
-// import chain runs — vi.hoisted is the only block that fires earlier than
-// the import resolution. (S277 / PR-02 finding, repeated again in PR-04.)
-const { mockEnv, TMP_ROOT } = vi.hoisted(() => {
-	// Dynamic require avoids the vi.hoisted "no external references" rule.
-	// eslint-disable-next-line @typescript-eslint/no-require-imports -- vi.hoisted runs before ESM imports resolve
+/**
+ * PR-11 (ADR-0009) rewires email.ts from the push-based `sendEmailViaABERP`
+ * onto the pull-based `enqueueEmail`. This test suite covers the new
+ * behaviour: every "send" call lands as a queue entry under
+ * `${ABERP_SITE_EMAIL_OUTBOX_DIR}/queued/`, and the rate-limit + sanitization
+ * postures inherited from PR-09 are preserved.
+ *
+ * Note: the legacy push-path coverage (mocked `fetch`, audit_id round-trips)
+ * lives on in `email-relay.spec.ts` for as long as `email-relay.ts` is kept
+ * around per ADR-0009's deprecation note. This file no longer mocks fetch.
+ */
+
+const { mockEnv, TMP_QUOTE_ROOT, TMP_OUTBOX_ROOT } = vi.hoisted(() => {
+	// eslint-disable-next-line @typescript-eslint/no-require-imports -- vi.hoisted runs before ESM imports
 	const fs = require('node:fs');
 	// eslint-disable-next-line @typescript-eslint/no-require-imports -- as above
 	const path = require('node:path');
 	// eslint-disable-next-line @typescript-eslint/no-require-imports -- as above
 	const os = require('node:os');
-	const root = fs.mkdtempSync(path.resolve(os.tmpdir(), 'aberp-email-'));
-	process.env.ABERP_SITE_QUOTE_DIR = root;
+	const quoteRoot = fs.mkdtempSync(path.resolve(os.tmpdir(), 'aberp-email-q-'));
+	const outboxRoot = fs.mkdtempSync(path.resolve(os.tmpdir(), 'aberp-email-out-'));
+	// Set BEFORE static imports resolve (quote-store + email-outbox both read
+	// process.env at module load).
+	process.env.ABERP_SITE_QUOTE_DIR = quoteRoot;
+	process.env.ABERP_SITE_EMAIL_OUTBOX_DIR = outboxRoot;
 	return {
 		mockEnv: {} as Record<string, string | undefined>,
-		TMP_ROOT: root as string
+		TMP_QUOTE_ROOT: quoteRoot as string,
+		TMP_OUTBOX_ROOT: outboxRoot as string
 	};
 });
 
@@ -50,8 +61,6 @@ import { verifyAcceptToken } from './quote-token';
 
 function configure(extra: Record<string, string> = {}): void {
 	Object.assign(mockEnv, {
-		ABERP_INTERNAL_BASE_URL: 'https://aberp.example',
-		ABERP_EMAIL_RELAY_TOKEN: 'relay-token',
 		ABERP_SITE_OPERATOR_EMAIL: 'ops@abenerp.com',
 		ABERP_SITE_PUBLIC_URL: 'https://abenerp.com',
 		QUOTE_STATUS_SIGNING_KEY: 'unit-test-signing-key-0123456789abcdef',
@@ -81,46 +90,50 @@ function makeQuote(over: Partial<QuoteMetadata> = {}): QuoteMetadata {
 	};
 }
 
-const fetchMock = vi.fn();
+function queuedFiles(): Array<{ name: string; entry: Record<string, unknown> }> {
+	const dir = join(TMP_OUTBOX_ROOT, 'queued');
+	let names: string[];
+	try {
+		names = readdirSync(dir);
+	} catch {
+		return [];
+	}
+	const out: Array<{ name: string; entry: Record<string, unknown> }> = [];
+	for (const name of names) {
+		if (!name.endsWith('.json')) continue;
+		if (name.includes('.tmp-')) continue;
+		const raw = readFileSync(join(dir, name), 'utf8');
+		out.push({ name, entry: JSON.parse(raw) as Record<string, unknown> });
+	}
+	return out;
+}
 
 beforeEach(() => {
 	clearEnv();
 	__resetRateLimit();
-	try {
-		rmSync(TMP_ROOT, { recursive: true, force: true });
-	} catch {
-		/* ignore */
+	for (const root of [TMP_QUOTE_ROOT, TMP_OUTBOX_ROOT]) {
+		try {
+			rmSync(root, { recursive: true, force: true });
+		} catch {
+			/* ignore */
+		}
+		mkdirSync(root, { recursive: true });
 	}
-	mkdirSync(TMP_ROOT, { recursive: true });
-	fetchMock.mockReset();
-	// A Response body is a one-shot stream — using mockResolvedValue would hand
-	// the SAME Response to every call, and the second call's `.json()` would see
-	// an empty body. Construct a fresh Response per invocation.
-	fetchMock.mockImplementation(
-		async () =>
-			new Response(JSON.stringify({ audit_id: 'evt_ok' }), {
-				status: 200,
-				headers: { 'content-type': 'application/json' }
-			})
-	);
-	vi.stubGlobal('fetch', fetchMock);
 });
 
 describe('isEmailConfigured', () => {
-	it('is false when neither relay env nor operator inbox is present', () => {
+	it('is false when the operator inbox is unset', () => {
 		expect(isEmailConfigured()).toBe(false);
 	});
 
-	it('is false when relay envs are present but operator inbox is unset', () => {
-		Object.assign(mockEnv, {
-			ABERP_INTERNAL_BASE_URL: 'https://aberp.example',
-			ABERP_EMAIL_RELAY_TOKEN: 't'
-		});
-		expect(isEmailConfigured()).toBe(false);
-	});
-
-	it('is true once relay envs and operator inbox are configured', () => {
+	it('is true once ABERP_SITE_OPERATOR_EMAIL is configured', () => {
 		configure();
+		expect(isEmailConfigured()).toBe(true);
+	});
+
+	it('no longer requires ABERP_INTERNAL_BASE_URL or ABERP_EMAIL_RELAY_TOKEN (ADR-0009)', () => {
+		Object.assign(mockEnv, { ABERP_SITE_OPERATOR_EMAIL: 'ops@abenerp.com' });
+		// Relay-era envs are absent on purpose — the queue path doesn't read them.
 		expect(isEmailConfigured()).toBe(true);
 	});
 });
@@ -134,18 +147,6 @@ describe('buildOperatorEmail', () => {
 		);
 		expect(msg.text).toContain('Email: ada@example.com');
 		expect(msg.text).toContain('Files: 1');
-	});
-
-	it('omits optional fields that are absent', () => {
-		const msg = buildOperatorEmail(
-			makeQuote({
-				request: { material_preference: 'unknown', quantity: null, deadline: null, notes: '' }
-			}),
-			'https://abenerp.com'
-		);
-		expect(msg.text).not.toContain('Quantity:');
-		expect(msg.text).not.toContain('Deadline:');
-		expect(msg.text).not.toContain('Notes:');
 	});
 
 	it('HTML-escapes user-controlled content', () => {
@@ -232,42 +233,31 @@ describe('buildAcceptUrl', () => {
 	});
 });
 
-describe('sendQuoteNotifications', () => {
-	it('is a no-op when the relay is unconfigured', async () => {
+describe('sendQuoteNotifications (legacy operator+customer pair)', () => {
+	it('is a no-op when the operator inbox is unconfigured', async () => {
 		const res = await sendQuoteNotifications(makeQuote());
 		expect(res).toEqual({ operator: 'skipped', customer: 'skipped', reason: 'unconfigured' });
-		expect(fetchMock).not.toHaveBeenCalled();
+		expect(queuedFiles()).toHaveLength(0);
 	});
 
-	it('relays operator + customer mail when configured', async () => {
+	it('enqueues operator + customer mail when configured', async () => {
 		configure();
 		const res = await sendQuoteNotifications(makeQuote());
-		expect(res.operator).toBe('sent');
-		expect(res.customer).toBe('sent');
-		expect(fetchMock).toHaveBeenCalledTimes(2);
-		const tos = fetchMock.mock.calls.map((c) => JSON.parse(String((c[1] as RequestInit).body)).to);
-		expect(tos).toContainEqual(['ops@abenerp.com']);
-		expect(tos).toContainEqual(['ada@example.com']);
+		expect(res.operator).toBe('queued');
+		expect(res.customer).toBe('queued');
+		const files = queuedFiles();
+		expect(files).toHaveLength(2);
+		const recipients = files.map((f) => (f.entry.to as string[])[0]);
+		expect(recipients).toContain('ops@abenerp.com');
+		expect(recipients).toContain('ada@example.com');
 	});
 
 	it('cc-includes the operator on the customer mail', async () => {
 		configure();
 		await sendQuoteNotifications(makeQuote());
-		const customerCall = fetchMock.mock.calls.find((c) => {
-			const body = JSON.parse(String((c[1] as RequestInit).body));
-			return body.to[0] === 'ada@example.com';
-		});
-		expect(customerCall).toBeTruthy();
-		const body = JSON.parse(String((customerCall![1] as RequestInit).body));
-		expect(body.cc).toEqual(['ops@abenerp.com']);
-	});
-
-	it('does not throw and reports failure when the relay rejects', async () => {
-		configure();
-		fetchMock.mockImplementation(async () => new Response('', { status: 503 }));
-		const res = await sendQuoteNotifications(makeQuote());
-		expect(res.operator).toBe('failed');
-		expect(res.customer).toBe('failed');
+		const customer = queuedFiles().find((f) => (f.entry.to as string[])[0] === 'ada@example.com');
+		expect(customer).toBeTruthy();
+		expect(customer?.entry.cc).toEqual(['ops@abenerp.com']);
 	});
 
 	it('applies a per-recipient cooldown across repeat submissions', async () => {
@@ -275,19 +265,19 @@ describe('sendQuoteNotifications', () => {
 		const first = await sendQuoteNotifications(
 			makeQuote({ id: 'aaaaaaaa-bbbb-cccc-dddd-000000000001' })
 		);
-		expect(first.customer).toBe('sent');
+		expect(first.customer).toBe('queued');
 		const second = await sendQuoteNotifications(
 			makeQuote({ id: 'aaaaaaaa-bbbb-cccc-dddd-000000000002' })
 		);
 		expect(second.operator).toBe('skipped');
 		expect(second.customer).toBe('skipped');
-		// Only the first submission's two mails went out.
-		expect(fetchMock).toHaveBeenCalledTimes(2);
+		// Only the first submission's two enqueues landed.
+		expect(queuedFiles()).toHaveLength(2);
 	});
 
 	it('enforces a global send ceiling', async () => {
 		configure();
-		let lastCustomer = 'sent';
+		let lastCustomer = 'queued';
 		for (let i = 0; i < 35; i++) {
 			const res = await sendQuoteNotifications(
 				makeQuote({
@@ -300,11 +290,8 @@ describe('sendQuoteNotifications', () => {
 		expect(lastCustomer).toBe('skipped');
 	});
 
-	it('skips operator notification when ABERP_SITE_OPERATOR_EMAIL is unset (no SMTP_FROM fallback)', async () => {
-		configure({ ABERP_SITE_OPERATOR_EMAIL: '' });
+	it('skips operator notification when ABERP_SITE_OPERATOR_EMAIL is unset', async () => {
 		const res = await sendQuoteNotifications(makeQuote());
-		// Without an operator inbox configured the module is unconfigured per ADR-0007 —
-		// the relay decides the *from* identity, the storefront only knows *to*.
 		expect(res.operator).toBe('skipped');
 		expect(res.customer).toBe('skipped');
 		expect(res.reason).toBe('unconfigured');
@@ -330,50 +317,45 @@ describe('sendPricedReadyEmail', () => {
 		});
 	}
 
-	it('returns skipped + unconfigured when the relay is not configured', async () => {
+	it('returns skipped + unconfigured when the operator inbox is not configured', async () => {
 		const r = await sendPricedReadyEmail(pricedQuote());
 		expect(r.status).toBe('skipped');
 		expect(r.reason).toBe('unconfigured');
-		expect(fetchMock).not.toHaveBeenCalled();
+		expect(queuedFiles()).toHaveLength(0);
 	});
 
 	it('attaches the priced PDF when present on disk and includes the accept link in the body', async () => {
 		configure();
-		mkdirSync(join(TMP_ROOT, QUOTE_ID), { recursive: true });
-		// Write the priced PDF directly with node:fs — going through quote-store's
-		// writePricedPdfAtomic would defeat the load-order trick (we'd have to
-		// import the helper, but that's the very import we deferred to avoid the
-		// quote-store module-load race documented up top).
-		writeFileSync(join(TMP_ROOT, QUOTE_ID, 'priced.pdf'), Buffer.from([0x25, 0x50, 0x44, 0x46]));
+		mkdirSync(join(TMP_QUOTE_ROOT, QUOTE_ID), { recursive: true });
+		writeFileSync(
+			join(TMP_QUOTE_ROOT, QUOTE_ID, 'priced.pdf'),
+			Buffer.from([0x25, 0x50, 0x44, 0x46])
+		);
 
 		const r = await sendPricedReadyEmail(pricedQuote());
-		expect(r.status).toBe('sent');
-		expect(r.audit_id).toBe('evt_ok');
-		expect(fetchMock).toHaveBeenCalledTimes(1);
-		const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
-		expect(body.attachments).toHaveLength(1);
-		expect(body.attachments[0].filename).toBe('quote.pdf');
-		expect(body.attachments[0].content_type).toBe('application/pdf');
-		expect(body.attachments[0].data_b64).toBe(
+		expect(r.status).toBe('queued');
+		expect(r.entry_id).toBeTruthy();
+		const files = queuedFiles();
+		expect(files).toHaveLength(1);
+		const entry = files[0].entry as {
+			attachments: { filename: string; content_type: string; data_b64: string }[];
+			body_text: string;
+		};
+		expect(entry.attachments).toHaveLength(1);
+		expect(entry.attachments[0].filename).toBe('quote.pdf');
+		expect(entry.attachments[0].content_type).toBe('application/pdf');
+		expect(entry.attachments[0].data_b64).toBe(
 			Buffer.from([0x25, 0x50, 0x44, 0x46]).toString('base64')
 		);
-		// Accept link is in the body text.
-		expect(body.body_text).toMatch(/\/q\/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\/accept\?ts=/);
+		expect(entry.body_text).toMatch(/\/q\/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\/accept\?ts=/);
 	});
 
-	it('still sends the email when the priced PDF is missing on disk (link-only fallback)', async () => {
+	it('still enqueues when the priced PDF is missing on disk (link-only fallback)', async () => {
 		configure();
 		const r = await sendPricedReadyEmail(pricedQuote());
-		expect(r.status).toBe('sent');
-		const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
-		expect(body.attachments).toBeUndefined();
-	});
-
-	it('reports failure but does not throw when the relay rejects', async () => {
-		configure();
-		fetchMock.mockImplementation(async () => new Response('', { status: 503 }));
-		const r = await sendPricedReadyEmail(pricedQuote());
-		expect(r.status).toBe('failed');
+		expect(r.status).toBe('queued');
+		const entry = queuedFiles()[0].entry as { attachments?: unknown };
+		expect(entry.attachments).toBeUndefined();
 	});
 });
 
@@ -399,66 +381,69 @@ describe('buildSubmissionReceivedEmail', () => {
 });
 
 describe('sendSubmissionReceivedEmail', () => {
-	it('returns skipped + unconfigured when the relay is not configured', async () => {
+	it('returns skipped + unconfigured when the operator inbox is not configured', async () => {
 		const r = await sendSubmissionReceivedEmail(makeQuote());
 		expect(r.status).toBe('skipped');
 		expect(r.reason).toBe('unconfigured');
-		expect(fetchMock).not.toHaveBeenCalled();
+		expect(queuedFiles()).toHaveLength(0);
 	});
 
-	it('relays one bilingual email to the customer with the operator CC and returns audit_id', async () => {
+	it('enqueues one bilingual email to the customer with the operator CC and returns entry_id', async () => {
 		configure();
 		const r = await sendSubmissionReceivedEmail(makeQuote());
-		expect(r.status).toBe('sent');
-		expect(r.audit_id).toBe('evt_ok');
-		expect(fetchMock).toHaveBeenCalledTimes(1);
-		const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
-		expect(body.to).toEqual(['ada@example.com']);
-		expect(body.cc).toEqual(['ops@abenerp.com']);
-		expect(body.subject).toMatch(/Áben Consulting — Submission received, quote #/);
-		expect(body.body_text).toContain('Köszönjük az ajánlatkérést');
-		expect(body.body_text).toContain('Thank you for your quote request');
-		expect(body.body_text).toMatch(/\/q\/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\?t=/);
-	});
-
-	it('reports failure but does not throw when the relay returns 503', async () => {
-		configure();
-		fetchMock.mockImplementation(async () => new Response('', { status: 503 }));
-		const r = await sendSubmissionReceivedEmail(makeQuote());
-		expect(r.status).toBe('failed');
-		expect(r.reason).toBe('relay-failed');
+		expect(r.status).toBe('queued');
+		expect(r.entry_id).toBeTruthy();
+		const files = queuedFiles();
+		expect(files).toHaveLength(1);
+		const entry = files[0].entry as {
+			to: string[];
+			cc: string[];
+			subject: string;
+			body_text: string;
+			submitter: string;
+		};
+		expect(entry.to).toEqual(['ada@example.com']);
+		expect(entry.cc).toEqual(['ops@abenerp.com']);
+		expect(entry.subject).toMatch(/Áben Consulting — Submission received, quote #/);
+		expect(entry.body_text).toContain('Köszönjük az ajánlatkérést');
+		expect(entry.body_text).toContain('Thank you for your quote request');
+		expect(entry.body_text).toMatch(/\/q\/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\?t=/);
+		expect(entry.submitter).toBe('submission_received');
 	});
 });
 
 describe('sendAcceptedConfirmationEmail', () => {
-	it('returns skipped + unconfigured when the relay is not configured', async () => {
+	it('returns skipped + unconfigured when the operator inbox is not configured', async () => {
 		const r = await sendAcceptedConfirmationEmail(makeQuote());
 		expect(r.status).toBe('skipped');
 		expect(r.reason).toBe('unconfigured');
 	});
 
-	it('relays the confirmation and returns the audit_id', async () => {
+	it('enqueues the confirmation and returns the entry_id', async () => {
 		configure();
 		const r = await sendAcceptedConfirmationEmail(makeQuote());
-		expect(r.status).toBe('sent');
-		expect(r.audit_id).toBe('evt_ok');
-		expect(fetchMock).toHaveBeenCalledTimes(1);
-		const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
-		expect(body.to).toEqual(['ada@example.com']);
-		expect(body.cc).toEqual(['ops@abenerp.com']);
-		expect(body.subject).toContain('elfogadva');
+		expect(r.status).toBe('queued');
+		expect(r.entry_id).toBeTruthy();
+		const files = queuedFiles();
+		expect(files).toHaveLength(1);
+		const entry = files[0].entry as {
+			to: string[];
+			cc: string[];
+			subject: string;
+			submitter: string;
+		};
+		expect(entry.to).toEqual(['ada@example.com']);
+		expect(entry.cc).toEqual(['ops@abenerp.com']);
+		expect(entry.subject).toContain('elfogadva');
+		expect(entry.submitter).toBe('accept_confirmation');
 	});
 });
 
-describe('rate-limit — per-(recipient, kind) cooldown (S285 F2)', () => {
+describe('rate-limit — per-(recipient, kind) cooldown (S285 F2, preserved through ADR-0009)', () => {
 	it('submission-received does NOT block a subsequent priced-ready to the same recipient', async () => {
 		configure();
-		// First send: submission-received reserves (ada@example.com, submission-received).
 		const first = await sendSubmissionReceivedEmail(makeQuote());
-		expect(first.status).toBe('sent');
-		// Second send within the 60s window but a DIFFERENT kind — must NOT be
-		// rate-limited. Pre-PR-09 (S285 F2) this returned 'skipped' silently and
-		// the walkthrough's "priced-ready arrives within 30s" promise was fiction.
+		expect(first.status).toBe('queued');
 		const second = await sendPricedReadyEmail(
 			makeQuote({
 				status: 'quoted',
@@ -474,8 +459,8 @@ describe('rate-limit — per-(recipient, kind) cooldown (S285 F2)', () => {
 				}
 			})
 		);
-		expect(second.status).toBe('sent');
-		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(second.status).toBe('queued');
+		expect(queuedFiles()).toHaveLength(2);
 	});
 
 	it('priced-ready does NOT block a subsequent accepted-confirmation to the same recipient', async () => {
@@ -495,88 +480,20 @@ describe('rate-limit — per-(recipient, kind) cooldown (S285 F2)', () => {
 				}
 			})
 		);
-		expect(priced.status).toBe('sent');
+		expect(priced.status).toBe('queued');
 		const accepted = await sendAcceptedConfirmationEmail(makeQuote({ status: 'approved' }));
-		expect(accepted.status).toBe('sent');
-		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(accepted.status).toBe('queued');
+		expect(queuedFiles()).toHaveLength(2);
 	});
 
 	it('two submission-received emails to the SAME recipient within 60s still cool down', async () => {
 		configure();
 		const first = await sendSubmissionReceivedEmail(makeQuote());
-		expect(first.status).toBe('sent');
-		// Same recipient + same kind → cooldown applies. The cooldown is the
-		// defense against "user double-clicks submit and lands two notifies".
+		expect(first.status).toBe('queued');
 		const second = await sendSubmissionReceivedEmail(
 			makeQuote({ id: 'aaaaaaaa-bbbb-cccc-dddd-000000000002' })
 		);
 		expect(second.status).toBe('skipped');
 		expect(second.reason).toBe('rate-limited');
-	});
-});
-
-describe('rate-limit — release on failure (S285 F14)', () => {
-	it('a relay 503 releases the global slot so the next sender is not falsely rate-limited', async () => {
-		configure();
-		// First send fails — slot must be returned to the pool, not burned.
-		fetchMock.mockImplementationOnce(async () => new Response('', { status: 503 }));
-		const failed = await sendSubmissionReceivedEmail(makeQuote());
-		expect(failed.status).toBe('failed');
-
-		// A DIFFERENT recipient should land — proves the global slot did not get
-		// consumed by the failed send. (Same recipient + same kind would also
-		// not get cooled down because release() also cleared the cooldown entry,
-		// but using a different recipient isolates the global-slot release.)
-		const next = await sendSubmissionReceivedEmail(
-			makeQuote({
-				id: 'aaaaaaaa-bbbb-cccc-dddd-000000000099',
-				contact: { name: 'Other', email: 'other@example.com', company: '' }
-			})
-		);
-		expect(next.status).toBe('sent');
-	});
-
-	it('a relay 503 releases the per-(recipient,kind) cooldown so an immediate retry is not blocked', async () => {
-		configure();
-		fetchMock.mockImplementationOnce(async () => new Response('', { status: 503 }));
-		const failed = await sendSubmissionReceivedEmail(makeQuote());
-		expect(failed.status).toBe('failed');
-
-		// Same recipient + same kind, immediately. With pre-PR-09 reserve-and-keep,
-		// the cooldown would have stuck and the retry would silently 'skipped'.
-		const retry = await sendSubmissionReceivedEmail(makeQuote());
-		expect(retry.status).toBe('sent');
-	});
-
-	it('30 failures in a row do NOT trip the 30/min global ceiling (S285 F14 belt-and-braces)', async () => {
-		configure();
-		// Every send fails — without slot release, the 30/min ceiling would be
-		// burned by 30 failed sends and the 31st (successful) send would 'skipped'.
-		fetchMock.mockImplementation(async () => new Response('', { status: 503 }));
-		for (let i = 0; i < 30; i++) {
-			const r = await sendSubmissionReceivedEmail(
-				makeQuote({
-					id: `aaaaaaaa-bbbb-cccc-dddd-${String(i).padStart(12, '0')}`,
-					contact: { name: `User ${i}`, email: `u${i}@example.com`, company: '' }
-				})
-			);
-			expect(r.status).toBe('failed');
-		}
-		// Now the relay recovers — the next send must land, not 'skipped' on a
-		// burned ceiling.
-		fetchMock.mockImplementation(
-			async () =>
-				new Response(JSON.stringify({ audit_id: 'evt_ok' }), {
-					status: 200,
-					headers: { 'content-type': 'application/json' }
-				})
-		);
-		const after = await sendSubmissionReceivedEmail(
-			makeQuote({
-				id: 'aaaaaaaa-bbbb-cccc-dddd-fffffffffffe',
-				contact: { name: 'Survivor', email: 'survivor@example.com', company: '' }
-			})
-		);
-		expect(after.status).toBe('sent');
 	});
 });

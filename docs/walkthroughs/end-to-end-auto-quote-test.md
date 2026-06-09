@@ -266,13 +266,13 @@ Click **Submit**.
 
 **[Email inbox]** Within ~10s of submit, an email should arrive from the storefront. Subject: `Áben Consulting — Submission received, quote #<short-id>`. Body: bilingual HU + EN, "Köszönjük az ajánlatkérést / Thank you for your quote request — Your indicative quote will be ready within an hour." with a status-page link of the form `https://abenerp.com/q/<UUID>?t=<status-token>`.
 
-This email is sent by the **PR-07 fire-and-forget path** in `/api/quote` (`sendSubmissionReceivedEmail`, ADR-0007 relay). The handler returns 200 immediately and queues the send via `setImmediate`, so a slow or broken relay never blocks the customer. **If it doesn't arrive, see Troubleshooting §"No email arrives" — but the customer still got their reference id on the confirmation page, so the rest of the walkthrough is unblocked.**
+This email is sent by the **PR-07 fire-and-forget path** in `/api/quote`, rewired in PR-11 onto the **storefront email outbox queue** (ADR-0009). The handler returns 200 immediately and the enqueue runs via `setImmediate`; the customer never waits on the disk write. ABERP's poller picks the queue entry up on its next 60s cycle and SMTP-relays the message itself. **If it doesn't arrive, see Troubleshooting §"No email arrives" — but the customer still got their reference id on the confirmation page, so the rest of the walkthrough is unblocked.**
 
 Its arrival is the first real validation that:
 
-- The storefront's `email-relay.ts` reached `ABERP_INTERNAL_BASE_URL`.
-- ABERP's `/api/internal/send-email` accepted the bearer (`ABERP_EMAIL_RELAY_TOKEN` matched).
-- ABERP's downstream SMTP sent the message.
+- The storefront persisted a queue entry under `/data/email-outbox/queued/<ulid>.json`.
+- ABERP's poller hit `GET /api/internal/email-queue` with `ABERP_SITE_ADMIN_TOKEN`, claimed the entry via `POST /api/internal/email-queue/{id}/claim`, sent it, and reported back via `POST /api/internal/email-queue/{id}/sent`.
+- ABERP's downstream SMTP delivered the message and the entry now lives in `/data/email-outbox/sent/<ulid>.json` with `audit_id` populated.
 
 **Verify:** the email is in your inbox within 5 minutes. The body contains a "view your quote status" link of the form `https://abenerp.com/q/<UUID>?t=<status-token>`.
 
@@ -325,7 +325,7 @@ Click **Retry** on the row after fixing.
 
 ### Step 5 — [Email inbox] Confirm the "your quote is ready" email arrives
 
-**[Email inbox]** Within ~30s after Step 3's `Posted` state, a second email should arrive. Subject: `Ajánlat <UUID-short> — készen áll / Your quote is ready`.
+**[Email inbox]** Within ~60s after Step 3's `Posted` state (one ABERP poll cycle), a second email should arrive. Subject: `Ajánlat <UUID-short> — készen áll / Your quote is ready`.
 
 Body:
 
@@ -361,9 +361,9 @@ A new tab opens at `/q/<UUID>/accept?ts=…&sig=…`. The page renders:
 
 ### Step 7 — [Email inbox] Confirm the "thank you for accepting" email
 
-**[Email inbox]** Within ~30s, a third email arrives. Subject: HU+EN, "Thank you for accepting your quote."
+**[Email inbox]** Within ~60s (one ABERP poll cycle), a third email arrives. Subject: HU+EN, "Thank you for accepting your quote."
 
-This is the second relay-path validation (the first was Step 2's submission-received email, the second was Step 5's quote-ready). Three relays through ABERP without dropping is the green-light signal for ADR-0007.
+This is the third queue-path validation (the first was Step 2's submission-received email, the second was Step 5's quote-ready). Three storefront-outbox entries consumed cleanly by ABERP's poller is the green-light signal for ADR-0009.
 
 **Verify:** the email is in the inbox; body confirms the acceptance reference.
 
@@ -479,16 +479,22 @@ For each predictable failure mode: symptom Ervin sees, WHERE to look first, and 
 
 ### No email arrives (within 5 min of expected send)
 
-- **Symptom:** Step 2 / Step 5 / Step 7 email never lands in inbox.
-- **WHERE first:** ABERP → Audit ledger → filter on `email.relayed_storefront` → there should be one row per expected email with `audit_id`.
-  - If the row is **present** but the email never arrived, the failure is downstream on ABERP's SMTP — check `[[aberp-smtp-spoc]]` keychain entry, ABERP's mail log.
-  - If the row is **absent**, the storefront never reached the relay. Check **[Browser SSH]** `sudo journalctl -u aberp-site -n 100 | grep -i 'EmailRelayError\|email-relay'` — common kinds are `unconfigured` (env vars missing — see Preflight 3), `unauthorized` (token mismatch), `network` (DNS or TCP to `ABERP_INTERNAL_BASE_URL` fails).
+Under ADR-0009 (PR-11) the storefront enqueues every email to disk; ABERP's poller picks them up. Diagnose in two stages:
+
+- **WHERE first (storefront):** **[Browser SSH]** `sudo ls -1 /data/email-outbox/queued/ /data/email-outbox/claimed/ /data/email-outbox/sent/ /data/email-outbox/failed/`.
+  - If the entry sits in **`queued/`** longer than one poll cycle, ABERP's poller is not running. Open ABERP → Settings → Quote Intake → "last cycle" timestamp; restart the daemon if stale.
+  - If the entry is in **`claimed/`** with no terminal transition, ABERP claimed it but crashed mid-send. Operator clears manually (move to `failed/` by hand) and re-issues if needed.
+  - If the entry is in **`failed/`**, open it: `last_error.class` + `last_error.detail` name the ABERP-side cause (SMTP 5xx, recipient blocked, etc.).
+  - If the entry is in **`sent/`** but the inbox is empty, ABERP's SMTP delivered the message but it landed in a spam folder or the recipient address is bad. Check `audit_id` against ABERP's audit ledger.
+- **WHERE next (ABERP, only if needed):** ABERP → Audit ledger → filter on `email.relayed_storefront`. The audit row should be cross-referenced by the storefront entry's `audit_id` field.
+- **Storefront enqueue failure:** check `sudo journalctl -u aberp-site -n 100 | grep -i 'enqueue\|email-outbox'`. Most common failure mode is a missing `ABERP_SITE_OPERATOR_EMAIL` env (per ADR-0009 the only env still load-bearing for the email path).
 - **Recipient typos:** Step 1's email was malformed. Re-submit a fresh quote.
 
-### Relay queue stuck (storefront keeps retrying 503)
+### Outbox claimed-but-stuck (ABERP claimed, never reported back)
 
-- **Symptom:** journalctl shows repeating `EmailRelayError('unavailable', 503)`.
-- **WHERE:** ABERP — likely SMTP daemon down or ABERP's `outbound_email_queue` table backed up. ABERP-side fix; the storefront's retry will resume once ABERP returns 200.
+- **Symptom:** `/data/email-outbox/claimed/<ulid>.json` sits past one full poll cycle.
+- **WHERE:** ABERP — the daemon claimed the entry but crashed before posting `sent` or `failed`. The storefront does NOT auto-recover claimed-but-stale entries in v1 (this is a documented ADR-0009 backlog item).
+- **Fix:** move the file by hand: `sudo mv /data/email-outbox/claimed/<ulid>.json /data/email-outbox/queued/<ulid>.json` — ABERP will re-claim on the next poll. The entry's `attempt_n` increments each time. **OR** drop it to `failed/` if the customer was already notified out-of-band.
 
 ### Approved row not picked up by ABERP (Step 8 hangs)
 
@@ -535,9 +541,9 @@ The following are real gaps surfaced by writing this walkthrough. None blocks th
 
 2. **Email-link prefetch.** Some MTAs (Outlook Safe Links, Gmail's mailer-daemon prefetch, corporate proxies) speculatively fetch URLs in email bodies. A GET of `/q/<UUID>/accept?ts=&sig=` from a prefetcher would render the accept page but NOT submit the form — so single-use enforcement holds. **However,** a future change that auto-accepts on landing (or a careless redirect) would be triggered by hover, not click. Mitigations TBD: rel="noreferrer", a typed-token gate (already implemented per Step 6), or a server-side "two-step" pattern.
 
-3. **Storefront → ABERP network topology in prod.** Today's `ABERP_INTERNAL_BASE_URL` likely points to `http://127.0.0.1:8080` (works only in local-dev when both processes share a host) or to a tunnel/VPN URL not yet specified. **Before the first real customer's quote, this topology needs a decision:** public TLS terminus on ABERP (with proper bearer hardening), Cloudflare Tunnel, Tailscale, or the "queue-and-let-ABERP-poll" fallback ADR-0007 §"Reconciliation with ADR-0006" sketched. **S299 will land an ADR comparing these four options.** Once that ADR closes, the "Local-dev test path (achievable today)" section above will be supplemented with a "Prod test path" section that mirrors today's LD-1..LD-5 sequence but against the chosen topology — and the prod-style Preflight 1..5 will be runnable without local-dev workarounds. See `[[email-send-path-pending]]`.
+3. ~~**Storefront → ABERP network topology in prod.**~~ **Partially closed by S299/S301 (ADR-0008, picked Option B / Cloudflare Tunnel) and S306/PR-11 (ADR-0009, retired the push leg for email).** The priced-quote writeback leg still needs the tunnel from ADR-0008; the email leg now goes through the storefront's pull-based queue (ADR-0009) and has no inbound dependency on ABERP. Once `cloudflared` is stood up per `docs/runbooks/cloudflare-tunnel-aberp.md`, the pipeline is prod-runnable end-to-end.
 
-4. ~~**"Submission received" email path — does the storefront send one today?**~~ **Shipped in PR-07 (S293).** `src/lib/server/email.ts` now exports `sendSubmissionReceivedEmail(q)` — a bilingual HU+EN template with the customer's signed status link. `/api/quote` fires it via `setImmediate` after the quote is persisted to disk, so the customer's 200 OK never blocks on the relay round-trip per `[[post-issue-async]]`. Failure paths (missing token, 503) log and swallow; the relay-side audit (`email.relayed_storefront`) is the source of truth ABERP-side. Step 2 above reflects the new shape.
+4. ~~**"Submission received" email path — does the storefront send one today?**~~ **Shipped in PR-07 (S293); rewired in PR-11 (S306) onto the storefront email outbox queue per ADR-0009.** `src/lib/server/email.ts` exports `sendSubmissionReceivedEmail(q)` — a bilingual HU+EN template with the customer's signed status link. `/api/quote` fires it via `setImmediate` after the quote is persisted to disk, so the customer's 200 OK never blocks on the enqueue per `[[post-issue-async]]`. Failure paths (missing operator inbox, disk write failure) log and swallow; ABERP's `email.relayed_storefront` audit is still the source of truth ABERP-side, now correlated to the queue entry's id via `POST /api/internal/email-queue/{id}/sent`. Step 2 above reflects the queue shape.
 
 5. ~~**Storefront `quoted → approved` flow into ABERP intake.**~~ **Shipped in S294/PR-08.** `src/routes/api/quotes/+server.ts` now has unit-test coverage proving the response shape ABERP consumes — `contact.{name,email}`, `request.{material_preference,quantity,deadline}`, `pricing.{valid_until,breakdown_json}`, and the acceptance audit trio (`accepted_at`, `acceptance_signature_ts`, optional `acceptance_audit_id`). The accept handler's `quoted → approved` transition (S283, untouched in this PR) lands the row directly in the polling endpoint's result set with all fields populated. PR-08 also added an optional `?since=<iso>` cursor — when `status=approved` it filters on `accepted_at >= since`, otherwise on `received_at >= since` — so the daemon can poll incrementally without re-fetching the full history. **Backlog deferred to next PR (out of scope for PR-08 per S294 brief):** ABERP-side operator-notification polish — when the daemon stages a newly-approved row into `quote_intake_log`, the Ajánlatok tab should surface the storefront `accepted_at` timestamp + a link back to `/q/{id}` for the audit trail. Step 8 of the test path above now treats the wire as load-bearing rather than speculative.
 
@@ -547,7 +553,9 @@ The following are real gaps surfaced by writing this walkthrough. None blocks th
 
 - Design doc — [`docs/design/storefront-auto-quote-pipeline.md`](../design/storefront-auto-quote-pipeline.md) §11 (walkthrough plan that this doc implements).
 - ADR-0005 — [HMAC accept link with 30-day expiry](../adr/0005-hmac-accept-link-expiry.md) (accept-link contract).
-- ADR-0007 — [Storefront email relay via ABERP](../adr/0007-storefront-email-relay-via-aberp.md) (relay endpoint contract, supersedes ADR-0006).
+- ADR-0007 — [Storefront email relay via ABERP](../adr/0007-storefront-email-relay-via-aberp.md) (relay endpoint contract, supersedes ADR-0006; superseded for the email leg by ADR-0009).
+- ADR-0008 — [Storefront ↔ ABERP network topology](../adr/0008-aberp-storefront-network-topology.md) (Option B / Cloudflare Tunnel picked for the push legs; superseded for the email leg by ADR-0009).
+- ADR-0009 — [Storefront-as-queue for outbound email](../adr/0009-storefront-as-queue-no-tunnel.md) (pull-based email outbox; supersedes ADR-0007's push shape).
 - `[[walkthrough-format]]` — the schoolboy-with-hands rule.
 - `[[aberp-python-auto-discovery]]` — S282 venv auto-provisioning so Preflight 4 just works.
 - `[[quote-csrf-origin]]` — the `ORIGIN`-env mismatch that 403s the accept POST.

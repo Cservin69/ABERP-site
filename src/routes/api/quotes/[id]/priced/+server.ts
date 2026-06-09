@@ -239,14 +239,13 @@ export const POST: RequestHandler = async ({ params, request }) => {
 	await writeQuoteAtomic(id, updated);
 
 	// Best-effort customer notification — the priced quote is already on disk
-	// and visible at /q/<id>?t=<token>; an email-relay outage must not 500 the
-	// ABERP writeback. See ADR-0007 §"Negative" — the storefront persists the
-	// request (the PDF + metadata) and a future sweep can retry. v1 keeps the
-	// caller flow simple: log on failure, return 200.
+	// and visible at /q/<id>?t=<token>; a queue-write failure must not 500 the
+	// ABERP writeback. Per ADR-0009 the storefront persists the request to the
+	// email outbox and ABERP's poller picks it up on the next cycle.
 	try {
 		const r = await sendPricedReadyEmail(updated);
 		if (r.status === 'failed') {
-			console.error('[priced] ready-email relay failed:', r.reason);
+			console.error('[priced] ready-email enqueue failed:', r.reason);
 		}
 	} catch (err) {
 		console.error('[priced] ready-email threw unexpectedly:', err);

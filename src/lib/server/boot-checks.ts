@@ -7,22 +7,21 @@ import { verifyBodySizeLimit } from './body-size-limit';
  *
  *   - F19: `BODY_SIZE_LIMIT` unset (or < 50 MB) — every priced writeback over
  *     the 512 KB adapter-node default 413s before the handler ever runs.
- *   - F8:  ABERP relay env unset (`ABERP_INTERNAL_BASE_URL`,
- *     `ABERP_EMAIL_RELAY_TOKEN`, `ABERP_SITE_OPERATOR_EMAIL`) — every
- *     customer email is silently dropped, discovered only when a customer
- *     complains.
+ *   - F8:  ABERP relay env unset — every customer email was silently dropped,
+ *     discovered only when a customer complained. PR-11 (ADR-0009) retires
+ *     the push-based relay; the only env still load-bearing for the email
+ *     path is `ABERP_SITE_OPERATOR_EMAIL` (the inbox we CC on customer mail).
+ *     `ABERP_INTERNAL_BASE_URL` / `ABERP_EMAIL_RELAY_TOKEN` are no longer
+ *     consulted by `email.ts`; they remain on the deploy docs as deprecated
+ *     envs for the duration of the email-relay deprecation window and are
+ *     not checked here.
  *
- * The S287 patch surfaced F1 as a `console.warn`. PR-09 escalates the
- * BODY_SIZE_LIMIT and relay checks to a fail-on-start so a misconfigured
- * deploy gets caught at boot, not on the first real customer's quote.
+ * The S287 patch surfaced F1 as a `console.warn`. PR-09 escalated the
+ * BODY_SIZE_LIMIT and relay checks to a fail-on-start; PR-11 narrows F8 to
+ * `ABERP_SITE_OPERATOR_EMAIL` only.
  *
  * The checks are skipped under vitest (`VITEST=true`) so the test suite can
- * import server modules without setting every prod env. The hooks.server.ts
- * `handle()` wraps `runBootChecks()` and 503s every request when the checks
- * fail — `process.exit(1)` would also work but would risk killing the test
- * process if something else slipped through; the per-request 503 is the
- * safer posture under adapter-node where there's no explicit "boot phase"
- * separate from the first request.
+ * import server modules without setting every prod env.
  */
 
 export interface BootCheckProblem {
@@ -39,8 +38,6 @@ interface BootCheckOptions {
 	/** Override `process.env`-derived values, for tests. */
 	env?: Partial<{
 		BODY_SIZE_LIMIT: string;
-		ABERP_INTERNAL_BASE_URL: string;
-		ABERP_EMAIL_RELAY_TOKEN: string;
 		ABERP_SITE_OPERATOR_EMAIL: string;
 	}>;
 }
@@ -49,30 +46,24 @@ function isPresent(v: string | undefined | null): boolean {
 	return typeof v === 'string' && v.trim().length > 0;
 }
 
-function checkRelayEnv(env: BootCheckOptions['env']): BootCheckProblem | null {
-	const base = env?.ABERP_INTERNAL_BASE_URL ?? process.env.ABERP_INTERNAL_BASE_URL;
-	const token = env?.ABERP_EMAIL_RELAY_TOKEN ?? process.env.ABERP_EMAIL_RELAY_TOKEN;
+function checkOperatorInbox(env: BootCheckOptions['env']): BootCheckProblem | null {
 	const operator = env?.ABERP_SITE_OPERATOR_EMAIL ?? process.env.ABERP_SITE_OPERATOR_EMAIL;
-	const missing: string[] = [];
-	if (!isPresent(base)) missing.push('ABERP_INTERNAL_BASE_URL');
-	if (!isPresent(token)) missing.push('ABERP_EMAIL_RELAY_TOKEN');
-	if (!isPresent(operator)) missing.push('ABERP_SITE_OPERATOR_EMAIL');
-	if (missing.length === 0) return null;
+	if (isPresent(operator)) return null;
 	return {
 		finding: 'F8',
 		message:
-			`[aberp-site] ABERP relay envs missing: ${missing.join(', ')}. ` +
-			`Per ADR-0007 the storefront's only egress for customer mail is the ABERP relay; ` +
-			`without these the submission-received, priced-ready, and accepted-confirmation ` +
-			`emails are silently dropped. Set all three in /etc/aberp-site.env or as systemd ` +
-			`Environment= lines. See docs/reviews/S285-adversarial-storefront-arc.md finding F8.`
+			'[aberp-site] ABERP_SITE_OPERATOR_EMAIL is not set. Per ADR-0009 this is ' +
+			'the only env knob still load-bearing for the email path — it is the inbox ' +
+			'we CC on every customer mail before enqueueing to the storefront-side ' +
+			'email outbox. Without it, submission-received / priced-ready / ' +
+			'accepted-confirmation are silently skipped. Set it in /etc/aberp-site.env ' +
+			'or as a systemd Environment= line.'
 	};
 }
 
 /**
  * Pure verification — does not throw or exit. Returns a verdict the caller
- * (hooks.server.ts) decides what to do with. The caller decides the policy
- * (503 vs. process.exit vs. warn) based on its own context.
+ * (hooks.server.ts) decides what to do with.
  */
 export function runBootChecks(opts: BootCheckOptions = {}): BootCheckResult {
 	const problems: BootCheckProblem[] = [];
@@ -82,8 +73,8 @@ export function runBootChecks(opts: BootCheckOptions = {}): BootCheckResult {
 		problems.push({ finding: 'F19', message: bodyVerdict.message });
 	}
 
-	const relayProblem = checkRelayEnv(opts.env);
-	if (relayProblem) problems.push(relayProblem);
+	const inboxProblem = checkOperatorInbox(opts.env);
+	if (inboxProblem) problems.push(inboxProblem);
 
 	return { ok: problems.length === 0, problems };
 }

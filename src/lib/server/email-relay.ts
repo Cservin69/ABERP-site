@@ -1,6 +1,13 @@
 import { env } from '$env/dynamic/private';
 
 /**
+ * @deprecated as of 2026-06-09 per ADR-0009 (storefront-as-queue, no tunnel).
+ * Push-based relay to ABERP is replaced by `email-outbox.ts` (pull-based).
+ * No call site in the storefront uses this module after PR-11; it is kept
+ * functional for the deprecation window so the migration is reversible and
+ * the existing `email-relay.spec.ts` suite continues to lint and run. A
+ * future PR removes both the module and its spec.
+ *
  * Thin HTTPS client for ABERP's `POST /api/internal/send-email` relay endpoint
  * (ADR-0007). SERVER-ONLY: imports `$env/dynamic/private` and must never be
  * pulled into `.svelte` / `+page.ts` components.

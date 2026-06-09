@@ -165,18 +165,18 @@ export const actions: Actions = {
 
 		const now = new Date().toISOString();
 
-		// Send the confirmation email BEFORE flipping state so the audit_id can be
-		// persisted in the same write. An email-relay failure does NOT roll back
-		// the acceptance — the quote IS accepted as soon as the customer typed
-		// the token; the email is a courtesy. `acceptance_audit_id` is left unset
-		// when the relay was unconfigured / unavailable.
-		let acceptanceAuditId: string | undefined;
+		// Enqueue the confirmation email BEFORE flipping state. An enqueue
+		// failure does NOT roll back the acceptance — the quote IS accepted as
+		// soon as the customer typed the token; the email is a courtesy. Per
+		// ADR-0009 the audit lineage (`acceptance_audit_id`) is set by ABERP
+		// later, via POST /api/internal/email-queue/{id}/sent — the storefront
+		// cannot capture it synchronously any more, so this field is unset at
+		// acceptance time. `acceptance_signature_ts` remains the binding proof
+		// of which signed link the customer used.
 		try {
 			const r = await sendAcceptedConfirmationEmail(existing);
-			if (r.status === 'sent' && r.audit_id) {
-				acceptanceAuditId = r.audit_id;
-			} else if (r.status === 'failed') {
-				console.error('[accept] confirmation-email relay failed:', r.reason);
+			if (r.status === 'failed') {
+				console.error('[accept] confirmation-email enqueue failed:', r.reason);
 			}
 		} catch (err) {
 			console.error('[accept] confirmation-email threw unexpectedly:', err);
@@ -187,7 +187,6 @@ export const actions: Actions = {
 			status: 'approved',
 			accepted_at: now,
 			acceptance_signature_ts: ts,
-			acceptance_audit_id: acceptanceAuditId,
 			status_history: [
 				...(existing.status_history ?? []),
 				{

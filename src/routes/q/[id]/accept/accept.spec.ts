@@ -385,19 +385,13 @@ describe('POST /q/{id}/accept — accept action', () => {
 		expect(await statusOf((actions.default as (e: any) => Promise<any>)(ev))).toBe(409);
 	});
 
-	it('records acceptance_audit_id when the confirmation relay returns a 200 with audit_id', async () => {
+	it('enqueues the accept-confirmation email when the operator inbox is configured, but does NOT set acceptance_audit_id (ADR-0009)', async () => {
 		seedQuote(QUOTE_ID, 'quoted', { pricing: pricingFor() });
-		// Stub the relay to a real fetchable.
-		envState.ABERP_INTERNAL_BASE_URL = 'https://aberp.example';
-		envState.ABERP_EMAIL_RELAY_TOKEN = 'relay-token';
+		// Under ADR-0009 the only env still load-bearing for the email path is
+		// the operator inbox. The accept-handler enqueues to disk and ABERP
+		// fills the audit id later, via POST /api/internal/email-queue/{id}/sent —
+		// the storefront cannot capture it synchronously any more.
 		envState.ABERP_SITE_OPERATOR_EMAIL = 'ops@abenerp.com';
-		const fetchMock = vi.fn().mockResolvedValue(
-			new Response(JSON.stringify({ audit_id: 'evt_accept_99' }), {
-				status: 200,
-				headers: { 'content-type': 'application/json' }
-			})
-		);
-		vi.stubGlobal('fetch', fetchMock);
 
 		const { actions } = await loadModule();
 		const { ts, sig } = await freshSig(QUOTE_ID);
@@ -406,9 +400,10 @@ describe('POST /q/{id}/accept — accept action', () => {
 		await (actions.default as (e: any) => Promise<any>)(ev);
 
 		const after = readSeeded(QUOTE_ID);
-		expect(after.acceptance_audit_id).toBe('evt_accept_99');
-		expect(fetchMock).toHaveBeenCalledTimes(1);
-
-		vi.unstubAllGlobals();
+		expect(after.status).toBe('approved');
+		// Field is intentionally unset on the accept write — see ADR-0009.
+		expect(after.acceptance_audit_id).toBeUndefined();
+		// acceptance_signature_ts remains the binding proof.
+		expect(after.acceptance_signature_ts).toBe(ts);
 	});
 });

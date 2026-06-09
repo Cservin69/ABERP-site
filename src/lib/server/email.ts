@@ -1,12 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { readFile } from 'node:fs/promises';
-import {
-	EmailRelayError,
-	isEmailRelayConfigured,
-	sendEmailViaABERP,
-	type EmailSendRequest,
-	type EmailSendResponse
-} from './email-relay';
+import { enqueueEmail, type EmailEnqueueRequest, type EmailSubmitter } from './email-outbox';
 import type { QuoteMetadata } from './quote-store';
 import { pricedPdfPath } from './quote-store';
 import { defaultAcceptExpiryIso, signAcceptToken, signQuoteToken } from './quote-token';
@@ -15,47 +9,53 @@ import { publicSiteUrl } from './public-url';
 /**
  * Transactional email for quote notifications. SERVER-ONLY.
  *
- * PR-04 rewires this module from nodemailer/local SMTP onto the ABERP relay
- * endpoint (ADR-0007 supersedes ADR-0006). The exported function signatures
- * and HTML/text builders are preserved so callers (the /api/quote handler and
- * the priced-writeback handler) do not change shape.
+ * PR-11 (ADR-0009) rewires this module from the push-based `email-relay.ts`
+ * onto the pull-based `email-outbox.ts` queue. Outbound mail is no longer
+ * POSTed to ABERP across a Cloudflare Tunnel — every send request lands on
+ * disk as a queue entry and ABERP's existing 60s poll consumes the queue.
  *
- * Design posture (preserved from PR-K, see [[trust-code-not-operator]]):
- *  - If the relay is not configured the module is a silent no-op. Quote
- *    submission and priced-writeback must never fail because email is
- *    unconfigured.
- *  - Sending is best-effort: a relay failure is logged and swallowed so it
- *    can never roll back a persisted quote or block a state transition.
+ * The exported function signatures (`sendSubmissionReceivedEmail`,
+ * `sendPricedReadyEmail`, `sendAcceptedConfirmationEmail`,
+ * `sendQuoteNotifications`) are preserved; only the **status** discriminant
+ * changes — `sent` becomes `queued` to reflect that the storefront cannot
+ * synchronously prove the message went out the SMTP wire. `audit_id` is
+ * dropped from the return shape because the audit lineage is set by ABERP
+ * later, via `POST /api/internal/email-queue/{id}/sent`.
+ *
+ * Design posture (preserved from PR-K through PR-09):
+ *  - If the operator inbox is not configured the module is a silent no-op.
+ *    Quote submission, priced-writeback, and accept must never fail because
+ *    the email path is unconfigured.
+ *  - Enqueue is best-effort: a disk write failure is logged and swallowed so
+ *    it can never roll back a persisted quote or block a state transition.
  *  - Rate limiting + per-recipient cooldown stop a flood of submissions from
- *    turning into a flood of relay calls. The authoritative rate-limit lives
- *    on the ABERP side now; the storefront ceiling is a defensive secondary.
+ *    turning into a flood of queue entries. Now enforced storefront-side
+ *    only (the relay-side ceiling that previously backed it is gone).
  *  - All user-controlled values are newline-stripped before they touch a
  *    header and HTML-escaped before they touch an HTML body. The /quote
  *    handler already rejects CR/LF/NUL, but this module does not trust that
  *    its one caller is the only caller.
  */
 
-interface RelayConfig {
+interface MailConfig {
 	operator: string;
 	publicUrl: string;
 }
 
-function readConfig(): RelayConfig | null {
-	if (!isEmailRelayConfigured()) return null;
-	// The relay decides the sender identity (single SPF/DKIM lineage, ADR-0007).
-	// The storefront still chooses where the *operator-side* alert mail lands.
-	// `ABERP_SITE_OPERATOR_EMAIL` is the only fallback; if unset, operator alerts
-	// are skipped so we never spam a stale SMTP_FROM mailbox the relay no longer
-	// knows about. PR-04 dropped SMTP_FROM as a fallback — see ADR-0007.
+function readConfig(): MailConfig | null {
+	// PR-11 / ADR-0009: the storefront no longer holds a relay base URL or
+	// relay token. The only env knob it still needs is the operator inbox to
+	// CC on customer mail. Without it, we skip silently so an under-configured
+	// dev / smoke environment still serves /quote without 503ing.
 	const operator = (env.ABERP_SITE_OPERATOR_EMAIL ?? '').trim();
 	if (!operator) return null;
 	return { operator, publicUrl: publicSiteUrl() };
 }
 
 /**
- * True when enough env is present to attempt a send via the ABERP relay AND a
- * canonical operator inbox is configured. Preserved as a boolean for caller
- * parity with the PR-K shape.
+ * True when the operator inbox is configured. Preserved as a boolean for
+ * caller parity with the PR-K shape — `false` means every send becomes a
+ * no-op rather than throwing.
  */
 export function isEmailConfigured(): boolean {
 	return readConfig() !== null;
@@ -64,8 +64,8 @@ export function isEmailConfigured(): boolean {
 // --- Rate limiting -------------------------------------------------------
 // Single-instance adapter-node deployment, so in-memory state is sufficient.
 const GLOBAL_WINDOW_MS = 60_000;
-const GLOBAL_MAX = 30; // messages per rolling minute across all recipients
-const RECIPIENT_COOLDOWN_MS = 60_000; // min gap between two mails of the SAME KIND to one address
+const GLOBAL_MAX = 30;
+const RECIPIENT_COOLDOWN_MS = 60_000;
 
 /**
  * Message-kind tags used to scope the per-recipient cooldown. S285 F2: the
@@ -74,9 +74,6 @@ const RECIPIENT_COOLDOWN_MS = 60_000; // min gap between two mails of the SAME K
  * email — i.e. on every fast walkthrough. Tuple-scoping the cooldown stops
  * one legitimate-message-class from cannibalising another while still
  * defeating "press submit twelve times" floods on a single kind.
- *
- * The set is closed: each call site passes a literal so a future surface
- * cannot land an untagged send by accident.
  */
 export type EmailKind =
 	| 'submission-received'
@@ -104,17 +101,9 @@ function cooldownKey(recipient: string, kind: EmailKind): string {
 }
 
 interface Reservation {
-	/** Releases the global slot and clears the per-(recipient,kind) cooldown. */
 	release(): void;
 }
 
-/**
- * Reserves a send slot for `recipient` × `kind`. Returns null when the global
- * window is full or the recipient is in cooldown for THIS kind. On a
- * successful reserve the caller gets a `Reservation` whose `release()` pops
- * both the global slot and the cooldown entry — call it when the send fails
- * so a flaky relay does not burn the 30/min ceiling for everyone (S285 F14).
- */
 function tryReserve(recipient: string, kind: EmailKind, now: number): Reservation | null {
 	pruneGlobal(now);
 	if (globalSends.length >= GLOBAL_MAX) return null;
@@ -125,18 +114,12 @@ function tryReserve(recipient: string, kind: EmailKind, now: number): Reservatio
 	recipientLastSend.set(key, now);
 	return {
 		release(): void {
-			// Pop OUR timestamp from the FIFO. We push at the tail; under normal
-			// concurrency the matching slot is the most recent equal-valued entry,
-			// so a backwards scan is correct even when other sends raced.
 			for (let i = globalSends.length - 1; i >= 0; i--) {
 				if (globalSends[i] === now) {
 					globalSends.splice(i, 1);
 					break;
 				}
 			}
-			// Clear the cooldown only if it still points at our reservation —
-			// otherwise a later successful send for the same (recipient, kind)
-			// would have its cooldown wrongly wiped.
 			if (recipientLastSend.get(key) === now) {
 				recipientLastSend.delete(key);
 			}
@@ -145,7 +128,6 @@ function tryReserve(recipient: string, kind: EmailKind, now: number): Reservatio
 }
 
 // --- Sanitization --------------------------------------------------------
-/** Strip CR/LF/NUL so a value can never inject extra headers. */
 function headerSafe(v: string): string {
 	// eslint-disable-next-line no-control-regex -- strip CR/LF/NUL header-injection chars
 	return v.replace(/[\r\n\x00]/g, ' ').trim();
@@ -234,12 +216,6 @@ export function buildCustomerEmail(q: QuoteMetadata): QuoteEmailContent {
 }
 
 // --- Submission-received template (PR-07, bilingual HU+EN) ---------------
-// Replaces the old English-only `buildCustomerEmail` send path for the
-// /api/quote flow. The latter is preserved as a utility (and unit-tested as
-// such) but is no longer called from the handler. Per the S284 walkthrough's
-// OQ #4 and [[walkthrough-format]] expectations, the customer sees one
-// bilingual message within ~10s of submit that links to the status page.
-
 export function buildSubmissionReceivedEmail(
 	q: QuoteMetadata,
 	statusUrl: string
@@ -277,53 +253,6 @@ export function buildSubmissionReceivedEmail(
 		'</div>'
 	].join('\n');
 	return { subject, text, html };
-}
-
-export interface SubmissionReceivedResult {
-	status: 'sent' | 'skipped' | 'failed';
-	audit_id?: string;
-	reason?: string;
-}
-
-/**
- * Sends the bilingual "submission received, pricing in progress" email to the
- * customer (with the operator CC'd so they get visibility without a dedicated
- * relay call). Wired via fire-and-forget from /api/quote so the customer's
- * 200 OK never blocks on the relay round-trip — per [[post-issue-async]] and
- * ADR-0007 §"Negative", relay outcome cannot affect the persisted quote.
- *
- * Like the rest of the module: never throws. The handler still wraps the
- * setImmediate body in a defensive `.catch` because contractual non-throwing
- * is one bug away from being a memory of one.
- */
-export async function sendSubmissionReceivedEmail(
-	q: QuoteMetadata
-): Promise<SubmissionReceivedResult> {
-	const cfg = readConfig();
-	if (!cfg) {
-		console.warn('[email] submission-received skipped: relay unconfigured');
-		return { status: 'skipped', reason: 'unconfigured' };
-	}
-	const customerEmail = headerSafe(q.contact.email);
-	if (!customerEmail) return { status: 'skipped', reason: 'no-recipient' };
-	const reservation = tryReserve(customerEmail, 'submission-received', Date.now());
-	if (!reservation) {
-		return { status: 'skipped', reason: 'rate-limited' };
-	}
-	const statusUrl = buildQuoteStatusUrl(q.id);
-	const msg = buildSubmissionReceivedEmail(q, statusUrl);
-	const res = await relaySendSafe({
-		to: [customerEmail],
-		cc: [cfg.operator],
-		subject: msg.subject,
-		body_text: msg.text,
-		body_html: msg.html
-	});
-	if (!res) {
-		reservation.release();
-		return { status: 'failed', reason: 'relay-failed' };
-	}
-	return { status: 'sent', audit_id: res.audit_id };
 }
 
 // --- Priced-ready + accepted-confirmation templates ----------------------
@@ -386,21 +315,31 @@ export function buildAcceptedConfirmationEmail(q: QuoteMetadata): QuoteEmailCont
 }
 
 // --- Send orchestration --------------------------------------------------
-export interface NotifyResult {
-	operator: 'sent' | 'skipped' | 'failed';
-	customer: 'sent' | 'skipped' | 'failed';
+
+export type EmailDispatchStatus = 'queued' | 'skipped' | 'failed';
+
+export interface EmailDispatchResult {
+	status: EmailDispatchStatus;
+	/** Queue entry id when `status === 'queued'`. */
+	entry_id?: string;
+	/** Reason discriminator: 'unconfigured' | 'no-recipient' | 'rate-limited' | 'enqueue-failed' */
 	reason?: string;
 }
 
-async function relaySendSafe(req: EmailSendRequest): Promise<EmailSendResponse | null> {
+export interface NotifyResult {
+	operator: EmailDispatchStatus;
+	customer: EmailDispatchStatus;
+	reason?: string;
+}
+
+async function enqueueSafe(
+	req: EmailEnqueueRequest,
+	submitter: EmailSubmitter
+): Promise<{ id: string } | null> {
 	try {
-		return await sendEmailViaABERP(req);
+		return await enqueueEmail(req, submitter);
 	} catch (err) {
-		if (err instanceof EmailRelayError) {
-			console.error(`[email] relay failed (${err.kind}, status=${err.status ?? 'n/a'})`);
-		} else {
-			console.error('[email] relay failed:', err);
-		}
+		console.error('[email] enqueue failed:', err);
 		return null;
 	}
 }
@@ -422,14 +361,17 @@ export async function sendQuoteNotifications(q: QuoteMetadata): Promise<NotifyRe
 	const opReservation = tryReserve(cfg.operator, 'operator-notify', now);
 	if (opReservation) {
 		const msg = buildOperatorEmail(q, cfg.publicUrl);
-		const res = await relaySendSafe({
-			to: [cfg.operator],
-			subject: msg.subject,
-			body_text: msg.text,
-			body_html: msg.html
-		});
+		const res = await enqueueSafe(
+			{
+				to: [cfg.operator],
+				subject: msg.subject,
+				body_text: msg.text,
+				body_html: msg.html
+			},
+			'other'
+		);
 		if (res) {
-			result.operator = 'sent';
+			result.operator = 'queued';
 		} else {
 			opReservation.release();
 			result.operator = 'failed';
@@ -438,23 +380,25 @@ export async function sendQuoteNotifications(q: QuoteMetadata): Promise<NotifyRe
 		result.reason = 'rate-limited';
 	}
 
-	// Customer confirmation. The relay does not have a per-call reply-to knob —
-	// the canonical sender on ABERP carries Reply-To at relay config time.
+	// Customer confirmation.
 	const customerEmail = headerSafe(q.contact.email);
 	const custReservation = customerEmail
 		? tryReserve(customerEmail, 'submission-received', Date.now())
 		: null;
 	if (customerEmail && custReservation) {
 		const msg = buildCustomerEmail(q);
-		const res = await relaySendSafe({
-			to: [customerEmail],
-			cc: [cfg.operator],
-			subject: msg.subject,
-			body_text: msg.text,
-			body_html: msg.html
-		});
+		const res = await enqueueSafe(
+			{
+				to: [customerEmail],
+				cc: [cfg.operator],
+				subject: msg.subject,
+				body_text: msg.text,
+				body_html: msg.html
+			},
+			'submission_received'
+		);
 		if (res) {
-			result.customer = 'sent';
+			result.customer = 'queued';
 		} else {
 			custReservation.release();
 			result.customer = 'failed';
@@ -469,10 +413,42 @@ export async function sendQuoteNotifications(q: QuoteMetadata): Promise<NotifyRe
 	return result;
 }
 
-export interface PricedReadyResult {
-	status: 'sent' | 'skipped' | 'failed';
-	audit_id?: string;
-	reason?: string;
+/**
+ * Sends the bilingual "submission received, pricing in progress" email to the
+ * customer (operator CC'd). Wired via fire-and-forget from /api/quote so the
+ * customer's 200 OK never blocks on the disk write — per [[post-issue-async]]
+ * and ADR-0009 §"Consequences", enqueue outcome cannot affect the persisted
+ * quote.
+ */
+export async function sendSubmissionReceivedEmail(q: QuoteMetadata): Promise<EmailDispatchResult> {
+	const cfg = readConfig();
+	if (!cfg) {
+		console.warn('[email] submission-received skipped: operator inbox unconfigured');
+		return { status: 'skipped', reason: 'unconfigured' };
+	}
+	const customerEmail = headerSafe(q.contact.email);
+	if (!customerEmail) return { status: 'skipped', reason: 'no-recipient' };
+	const reservation = tryReserve(customerEmail, 'submission-received', Date.now());
+	if (!reservation) {
+		return { status: 'skipped', reason: 'rate-limited' };
+	}
+	const statusUrl = buildQuoteStatusUrl(q.id);
+	const msg = buildSubmissionReceivedEmail(q, statusUrl);
+	const res = await enqueueSafe(
+		{
+			to: [customerEmail],
+			cc: [cfg.operator],
+			subject: msg.subject,
+			body_text: msg.text,
+			body_html: msg.html
+		},
+		'submission_received'
+	);
+	if (!res) {
+		reservation.release();
+		return { status: 'failed', reason: 'enqueue-failed' };
+	}
+	return { status: 'queued', entry_id: res.id };
 }
 
 /**
@@ -481,10 +457,9 @@ export interface PricedReadyResult {
  * a successful state flip into `quoted`.
  *
  * The accept link's `ts=` param is the 30-day-out ISO expiry per ADR-0005,
- * baked into both the URL and the HMAC input. The same expiry is the binding
- * one — verifyAcceptToken on the accept route must see the same string back.
+ * baked into both the URL and the HMAC input.
  */
-export async function sendPricedReadyEmail(q: QuoteMetadata): Promise<PricedReadyResult> {
+export async function sendPricedReadyEmail(q: QuoteMetadata): Promise<EmailDispatchResult> {
 	const cfg = readConfig();
 	if (!cfg) return { status: 'skipped', reason: 'unconfigured' };
 	const customerEmail = headerSafe(q.contact.email);
@@ -497,7 +472,7 @@ export async function sendPricedReadyEmail(q: QuoteMetadata): Promise<PricedRead
 	const acceptUrl = buildAcceptUrl(q.id);
 	const msg = buildPricedReadyEmail(q, acceptUrl);
 
-	let attachments: EmailSendRequest['attachments'];
+	let attachments: EmailEnqueueRequest['attachments'];
 	const pdfPath = pricedPdfPath(q.id);
 	if (pdfPath) {
 		try {
@@ -511,31 +486,26 @@ export async function sendPricedReadyEmail(q: QuoteMetadata): Promise<PricedRead
 			];
 		} catch (err) {
 			// Missing PDF is recoverable — the customer still gets the accept link.
-			// The priced-writeback flow wrote the PDF *before* it called us, so a
-			// read failure here means a disk / permissions issue, not a contract bug.
 			console.error('[email] priced PDF read failed:', err);
 		}
 	}
 
-	const res = await relaySendSafe({
-		to: [customerEmail],
-		cc: [cfg.operator],
-		subject: msg.subject,
-		body_text: msg.text,
-		body_html: msg.html,
-		attachments
-	});
+	const res = await enqueueSafe(
+		{
+			to: [customerEmail],
+			cc: [cfg.operator],
+			subject: msg.subject,
+			body_text: msg.text,
+			body_html: msg.html,
+			attachments
+		},
+		'priced_ready'
+	);
 	if (!res) {
 		reservation.release();
-		return { status: 'failed', reason: 'relay-failed' };
+		return { status: 'failed', reason: 'enqueue-failed' };
 	}
-	return { status: 'sent', audit_id: res.audit_id };
-}
-
-export interface AcceptedConfirmationResult {
-	status: 'sent' | 'skipped' | 'failed';
-	audit_id?: string;
-	reason?: string;
+	return { status: 'queued', entry_id: res.id };
 }
 
 /**
@@ -544,7 +514,7 @@ export interface AcceptedConfirmationResult {
  */
 export async function sendAcceptedConfirmationEmail(
 	q: QuoteMetadata
-): Promise<AcceptedConfirmationResult> {
+): Promise<EmailDispatchResult> {
 	const cfg = readConfig();
 	if (!cfg) return { status: 'skipped', reason: 'unconfigured' };
 	const customerEmail = headerSafe(q.contact.email);
@@ -554,31 +524,28 @@ export async function sendAcceptedConfirmationEmail(
 		return { status: 'skipped', reason: 'rate-limited' };
 	}
 	const msg = buildAcceptedConfirmationEmail(q);
-	const res = await relaySendSafe({
-		to: [customerEmail],
-		cc: [cfg.operator],
-		subject: msg.subject,
-		body_text: msg.text,
-		body_html: msg.html
-	});
+	const res = await enqueueSafe(
+		{
+			to: [customerEmail],
+			cc: [cfg.operator],
+			subject: msg.subject,
+			body_text: msg.text,
+			body_html: msg.html
+		},
+		'accept_confirmation'
+	);
 	if (!res) {
 		reservation.release();
-		return { status: 'failed', reason: 'relay-failed' };
+		return { status: 'failed', reason: 'enqueue-failed' };
 	}
-	return { status: 'sent', audit_id: res.audit_id };
+	return { status: 'queued', entry_id: res.id };
 }
 
 // --- Customer-facing status URLs -----------------------------------------
-// Single source of truth for customer-facing quote URLs and the confirmation
-// subject. The confirmation send path above (sendQuoteNotifications) can import
-// buildQuoteStatusUrl so the signed link is generated in exactly one place.
-// The host comes from `publicSiteUrl()` — the same env var used by the operator
-// admin-deep-link above (PR-Q reconciled the legacy URL/BASE_URL split).
 
 /**
  * The read-only status page link for a quote, with its signed token attached:
  *   https://abenerp.com/q/<id>?t=<token>
- * Without the `?t=` token the route 404s, so this URL is the only way in.
  */
 export function buildQuoteStatusUrl(id: string): string {
 	const token = signQuoteToken(id);
@@ -588,8 +555,6 @@ export function buildQuoteStatusUrl(id: string): string {
 /**
  * The 30-day-expiring accept URL for a quote (ADR-0005):
  *   https://abenerp.com/q/<id>/accept?ts=<iso>&sig=<sig>
- * Issued at email-send time; the route handler re-verifies the signature and
- * checks `ts > now()` on every GET and POST.
  */
 export function buildAcceptUrl(id: string): string {
 	const expiryIso = defaultAcceptExpiryIso(Date.now());
