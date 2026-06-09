@@ -30,6 +30,11 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # S313 / PR-14: cap the whole build job. Before this, the job had no
+    # timeout and inherited GitHub's 6h default — a hung step burned ~6h of
+    # runner time and silently blocked every main-push deploy. A healthy build
+    # is ~3–4 min, so 15 min is generous headroom with a hard ceiling.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -39,7 +44,23 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm run lint
-      - run: npm run test:unit -- --run
+      # S313 / PR-14: the Test step gets its own 5-min ceiling so a vitest
+      # non-termination fails RED here (clearly attributed) instead of dragging
+      # the whole job to its 15-min cap with an ambiguous cause.
+      #
+      # `--no-file-parallelism` serializes the vitest run. This is a HEURISTIC
+      # mitigation: the S313 investigation could NOT reproduce the reported
+      # hang locally (clean exit, 351 tests, ~2.3s) on either Node 25 (macOS)
+      # or Node 20.19.4 (the version CI's `node-version: '20'` resolves to),
+      # and the 26f7e0c diff contains no timers/watchers/intervals/background
+      # promises — so a leaked-handle root cause is not supported by evidence.
+      # The leading remaining hypothesis is worker over-subscription / a
+      # plugin-teardown deadlock under the forks pool on the 2-core hosted
+      # runner; serializing sidesteps that class of hang. If it proves
+      # unnecessary, deleting the flag is a one-line revert (no config change).
+      - name: Test
+        run: npm run test:unit -- --run --no-file-parallelism
+        timeout-minutes: 5
       - run: npm run build
       - name: Sanity-check build output
         run: |
