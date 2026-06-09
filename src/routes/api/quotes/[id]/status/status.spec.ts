@@ -298,3 +298,92 @@ describe('POST /api/quotes/{id}/status — received is initial-only', () => {
 		expect(after.status_history).toBeUndefined();
 	});
 });
+
+describe('POST /api/quotes/{id}/status — PR-10 / S297 F3: idempotent same-state on every status', () => {
+	// S296 F3 — the S295 forbidden-target gate pre-empted `from === to`
+	// for `quoted` and `approved`. An ABERP idempotent re-poll against
+	// an already-approved row received a hard 403 instead of a 200 noop.
+	// The fix moves `from === to` ABOVE the forbidden gates so idempotent
+	// same-state is universally safe. These pins prevent regression to
+	// the F3 shape — they are load-bearing for ABERP's intake daemon
+	// retry semantics.
+
+	it('idempotent_same_state_approved_returns_noop_200', async () => {
+		const { POST } = await loadHandler();
+		seedQuote(QUOTE_ID, 'approved', {
+			status_history: [
+				{ at: 'x', from: 'received', to: 'quoting', notes: '' },
+				{ at: 'y', from: 'quoting', to: 'quoted', notes: '' },
+				{ at: 'z', from: 'quoted', to: 'approved', notes: '' }
+			]
+		});
+		const req = postReq(QUOTE_ID, { status: 'approved' });
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
+		const res = await POST({ params: { id: QUOTE_ID }, request: req } as any);
+		// MUST be 200 noop, NOT 403 forbidden_transition. Pre-PR-10 this
+		// returned 403 because the forbidden-target gate ran first.
+		expect(res.status).toBe(200);
+		const after = readSeeded(QUOTE_ID);
+		expect(after.status).toBe('approved');
+		// No additional status_history row — noop must be silent.
+		expect((after.status_history as unknown[]).length).toBe(3);
+	});
+
+	it('idempotent_same_state_quoted_returns_noop_200', async () => {
+		const { POST } = await loadHandler();
+		seedQuote(QUOTE_ID, 'quoted', {
+			status_history: [{ at: 'x', from: 'received', to: 'quoting', notes: '' }]
+		});
+		const req = postReq(QUOTE_ID, { status: 'quoted' });
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
+		const res = await POST({ params: { id: QUOTE_ID }, request: req } as any);
+		// MUST be 200 noop, NOT 403. The /priced endpoint is the legitimate
+		// first-time writer for `quoted` — but an idempotent re-write from
+		// a row already at `quoted` is universally safe.
+		expect(res.status).toBe(200);
+		const after = readSeeded(QUOTE_ID);
+		expect(after.status).toBe('quoted');
+		expect((after.status_history as unknown[]).length).toBe(1);
+	});
+
+	it('idempotent_same_state_invoiced_returns_noop_200', async () => {
+		// Terminal-state idempotency — was already 200 noop pre-PR-10
+		// because `to === 'invoiced'` was not in the forbidden-target
+		// set. Pin it so a future refactor doesn't add `invoiced` to
+		// that list and silently re-open the same-shape gap.
+		const { POST } = await loadHandler();
+		seedQuote(QUOTE_ID, 'invoiced');
+		const req = postReq(QUOTE_ID, { status: 'invoiced' });
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
+		const res = await POST({ params: { id: QUOTE_ID }, request: req } as any);
+		expect(res.status).toBe(200);
+		expect(readSeeded(QUOTE_ID).status).toBe('invoiced');
+	});
+
+	it('first-time set of `approved` from a non-quoted state is STILL forbidden (403)', async () => {
+		// Defence-in-depth: the F3 fix relaxes the noop case ONLY. The
+		// typed-ACCEPT gate (S295 F3 design intent) must still hold —
+		// a bearer-authed caller cannot newly set `approved` from any
+		// non-approved state. Pre-PR-10 this returned 403; post-PR-10
+		// it must STILL return 403.
+		const { POST } = await loadHandler();
+		seedQuote(QUOTE_ID, 'quoted');
+		const req = postReq(QUOTE_ID, { status: 'approved' });
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
+		const res = await POST({ params: { id: QUOTE_ID }, request: req } as any);
+		expect(res.status).toBe(403);
+		const body = (await res.json()) as { error: string };
+		expect(body.error).toContain('approved is only settable by the customer accept POST');
+	});
+
+	it('first-time set of `quoted` from a non-quoted state is STILL forbidden (403)', async () => {
+		// Same defence-in-depth as above for the /priced ownership of
+		// the `quoted` transition.
+		const { POST } = await loadHandler();
+		seedQuote(QUOTE_ID, 'received');
+		const req = postReq(QUOTE_ID, { status: 'quoted' });
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
+		const res = await POST({ params: { id: QUOTE_ID }, request: req } as any);
+		expect(res.status).toBe(403);
+	});
+});

@@ -12,44 +12,68 @@
 
 ---
 
-## Local-dev test path (achievable today, 2026-06-08)
+## Local-dev test path (achievable today, 2026-06-09)
 
-**Read this first if you are running the test against a Mac-hosted ABERP and a `npm run dev` storefront on the same machine.** The Preflight section below is written for the eventual prod topology; tonight's reality (the storefront still cannot reach ABERP across the public internet — open question #3) is that the only achievable end-to-end run is local-dev. Five operator-discipline steps gate that run. Each is a `[[trust-code-not-operator]]` violation we are documenting honestly until S291 ships `./run/dev-test.sh` (in flight) — that launcher collapses every line below into one command.
+**Read this first if you are running the test against a Mac-hosted ABERP and a `npm run dev` storefront on the same machine.** The Preflight section below is written for the eventual prod topology; today's reality (the storefront still cannot reach ABERP across the public internet — open question #3) is that the only achievable end-to-end run is local-dev. **As of `PROD_v2.27.7` (S291 shipped 2026-06-09), the five operator-discipline steps that used to gate this run are collapsed into a single command.**
 
-### LD-1 — [Mac terminal] Find ABERP's current loopback port
+### Primary path — run `./run/dev-test.sh`
 
-ABERP binds its HTTPS loopback listener with `port=0`, so the OS assigns a fresh port every restart. Discover it:
+**[Mac terminal]** From the ABERP checkout:
+
+```sh
+cd /Users/aben/Documents/Claude/Projects/ABERP
+./run/dev-test.sh
+```
+
+That launcher (S291 / PR-272, shipped 2026-06-09):
+
+- pins the ABERP HTTPS loopback to port `18443` (no more `lsof` hunt after every restart);
+- mints the `aberp.email_relay.test.email_relay_token` Keychain entry on first run, reuses it after;
+- starts ABERP with `ABERP_DEV_MODE=1` + `ABERP_SISTER_SERVICE_BASE_URL=http://localhost:5173`;
+- waits for ABERP's atomic-written `~/.aberp/<tenant>/runtime.json` discovery file;
+- exports the matching env vars + starts the storefront's `npm run dev`;
+- opens `http://localhost:5173/quote` in your default browser when both are up.
+
+Skip directly to the Preflight section once both processes are running (the launcher tails their logs in the same terminal). **Per `[[trust-code-not-operator]]`: the launcher IS the operator discipline.**
+
+### Advanced — manual LD-1..LD-5 (non-Mac or operator-debugging only)
+
+Use this collapsed sequence ONLY if the launcher above is unavailable (e.g. running ABERP on Linux, or stepping through the seams for debugging). Skip otherwise.
+
+#### LD-1 — [Mac terminal] Find ABERP's current loopback port
+
+If you ran `dev-test.sh` it pinned the port to `18443`. If not, ABERP binds with `port=0` (OS-assigned). Discover the running port:
 
 ```sh
 lsof -nP -i4TCP -sTCP:LISTEN -c aberp
 ```
 
-The line with the high-numbered port (e.g. `60443`, `52017`) is ABERP. Note the number; you will use it in LD-4.
+The line with the high-numbered port (e.g. `60443`, `52017`) is ABERP. Note it for LD-4.
 
-**Known limitation:** the storefront's `ABERP_INTERNAL_BASE_URL` has to be updated each time ABERP restarts. S291's launcher pins a fixed port (`ABERP_HTTPS_PORT=18443`) to eliminate this — until that lands, the operator re-reads `lsof` after every ABERP restart.
-
-### LD-2 — [ABERP SPA] Point ABERP at the local storefront
+#### LD-2 — [ABERP SPA] Point ABERP at the local storefront
 
 ABERP → **Maintenance → Quote Intake → Base URL** → change from `https://abenerp.com` to `http://localhost:5173`. Save.
 
 This is what tells the catalogue-push daemon and the priced-writeback poster to dial the local Vite dev server instead of prod. If you skip this you will push the catalogue snapshot to prod and the local storefront's catalogue will be empty (or stale) — the material-grade alignment warning in Step 1 fires.
 
-S289 fixes the silent prod-pushing default; until it lands, this SPA toggle is the only safety.
+**Shipped in `PROD_v2.27.5` (S289 / PR-270):** catalogue-push hot-reloads the URL change without an ABERP restart, AND a dev-mode prod-URL boot/PUT warning catches `ABERP_DEV_MODE=1` + prod URL typos. The SPA toggle is still the operator's first action, but a typo no longer silently hammers prod.
 
-### LD-3 — [Mac terminal] Provision the email relay token in Keychain
+#### LD-3 — [Mac terminal] Provision the email relay token in Keychain
 
 ```sh
 TOKEN=$(openssl rand -hex 32)
 security add-generic-password \
   -a "$USER" \
-  -s "aberp.email_relay.prod.email_relay_token" \
+  -s "aberp.email_relay.test.email_relay_token" \
   -w "$TOKEN"
 echo "$TOKEN"   # copy this — needed in LD-4
 ```
 
+**Tenant name is `test`, not `prod`** — matches `dev-test.sh`'s `DEFAULT_TENANT="test"` (S296 review F38). If you mint under `prod`, the launcher would mint a second `test` token on its next run and you would accumulate orphan keychain entries.
+
 The same token has to be the bearer ABERP's `/api/internal/send-email` accepts and the bearer the storefront's `email-relay.ts` sends. If only one side has it, the relay returns 401 and the "your quote is ready" email is silently swallowed (logged, not raised — ADR-0007 §"Negative").
 
-### LD-4 — [Storefront terminal] Start dev with all five env vars
+#### LD-4 — [Storefront terminal] Start dev with all five env vars
 
 From the ABERP-site checkout:
 
@@ -64,7 +88,7 @@ npm run dev
 
 The `NODE_TLS_REJECT_UNAUTHORIZED=0` is because ABERP's loopback listener uses a self-signed cert. Local-dev only — production uses a real TLS terminus.
 
-### LD-5 — Sanity check before Step 1
+#### LD-5 — Sanity check before Step 1
 
 - Hit `http://localhost:5173/quote` in your browser — the form renders.
 - ABERP → **Auto-árazás** tab shows "Daemon active, polling every 60s."
@@ -72,7 +96,7 @@ The `NODE_TLS_REJECT_UNAUTHORIZED=0` is because ABERP's loopback listener uses a
 
 If any of those fails, back up and re-do the corresponding LD-step. **Skip Preflight 3 (the `/etc/aberp-site.env` checks) and Preflight 5 (the Lightsail `BODY_SIZE_LIMIT` check) — those are Lightsail-only.** Preflight 1 (ABERP version), Preflight 2 (storefront SHA — replace with `git -C $PWD log -1 --oneline` against your local checkout), and Preflight 4 (daemon active) still apply.
 
-**Forward link:** once S291's `./run/dev-test.sh` lands, LD-1 through LD-5 collapse to one command. Once S299's network-topology ADR closes (Cloudflare Tunnel / Tailscale / public TLS / polling-only), the prod-style preflight below becomes achievable without local-dev workarounds.
+**Forward link:** S291's `./run/dev-test.sh` shipped in `PROD_v2.27.7` (2026-06-09) and is now the primary path above. Once S299's network-topology ADR closes (Cloudflare Tunnel / Tailscale / public TLS / polling-only — see ADR-0008, Option B Accepted 2026-06-09), the prod-style preflight below becomes achievable without local-dev workarounds.
 
 ---
 
@@ -223,10 +247,10 @@ Fill the form:
 
 - **Name:** `Walkthrough Test`
 - **Email:** an address you can read (use the plus-trick: `you+walkthrough@yourdomain.com` so it's distinct from any prior test).
-- **Material:** pick from the dropdown — **but type a grade from ABERP's seeded catalogue**: `6061-T6`, `7075-T651`, `304`, `316`, `Ti-6Al-4V`, `Inconel 718`, `PEEK`, or `MONEL_650`. The form's hardcoded dropdown fallback list does NOT match these grades; if you pick from the fallback list (e.g. "Aluminium 6061" without the `-T6` suffix), the pricing job fails with **"material grade `X` is not in the catalogue snapshot"** after the `Extracting` step. **Cause:** the catalogue push from ABERP to the local storefront is not yet working in local-dev (the storefront URL still defaulted to prod). **Fix:** S289 (in flight) makes the push target match LD-2's SPA setting; until then, type one of the eight grades above manually. Also for the first end-to-end run, avoid materials with `stock_status != in_stock` so the addendum-2 banner test is a clean separate run later.
+- **Material:** pick from the dropdown — **but type a grade from ABERP's seeded catalogue**: `6061-T6`, `7075-T651`, `304`, `316`, `Ti-6Al-4V`, `Inconel 718`, `PEEK`, or `MONEL_650`. The form's hardcoded dropdown fallback list does NOT match these grades; if you pick from the fallback list (e.g. "Aluminium 6061" without the `-T6` suffix), the pricing job fails with **"material grade `X` is not in the catalogue snapshot"** after the `Extracting` step. **Cause:** the catalogue push from ABERP to the local storefront still needs a one-shot Test-push from ABERP → Materials → "Teszt push" (shipped in PROD_v2.27.5 / S289) to seed the local Vite dev server with the up-to-date catalogue. Once seeded, the eight grades above are accepted; until you do the test push (or wait for the cadence push), type one of the eight grades manually. Also for the first end-to-end run, avoid materials with `stock_status != in_stock` so the addendum-2 banner test is a clean separate run later.
 - **Quantity:** `5`.
 - **Needed-by date:** any date ≥ 2 weeks from today.
-- **CAD file:** upload **a simple known-good `.stl` shape**. **STL only in v1** — the Python extractor's STEP path is stubbed (S269 deferred it; S270+ slated, actively in flight as S292). Uploading a `.step` file fails after the `Extracting` step with `"STEP extraction not yet implemented in v1"`. A 30×30×30 mm cube STL is the safest first try. For v1 success, also avoid shapes with thin walls, 5-axis features, or internal pockets — the OCCT extractor is stubbed for many feature classes.
+- **CAD file:** upload **a simple known-good `.stl` or `.step` shape**. **STEP and STL both work as of `PROD_v2.27.8` (S292 / PR-273 — OCCT-backed STEP path shipped 2026-06-09).** Assemblies (multi-solid STEP) are explicitly rejected: ensure your STEP is a single-part solid; the row will surface "STEP file contains an assembly with N solids" if not. A 30×30×30 mm cube (either format) is the safest first try. For v1 success, also avoid shapes with thin walls, 5-axis features, or internal pockets — the OCCT extractor is stubbed for many feature classes. **STEP unit-of-measure normalisation** (PROD_v2.27.9 / S297 F2) silently converts `LENGTH_UNIT('METRE')` / `'CENTI METRE'` / `'INCH'` files to mm at import — but if your CAD tool emits the geometry coords AND the LENGTH_UNIT inconsistently (a Fusion bug class), inspect the bbox in the Pricing-job row's detail pane before clicking DEAL. **Other formats** (`.iges`, `.dxf`, `.sldprt`, `.obj`, …) are accepted at upload but fail at the extractor with a clear `Permanent` badge — the customer must re-upload in `.stl` / `.step` / `.stp`.
 - **Notes:** leave blank or write `walkthrough-test`.
 - **Honeypot fields:** do not touch (they are visually hidden — if you trigger them by tab-cycling, the submit will silently 400; redo).
 
@@ -415,8 +439,12 @@ For each predictable failure mode: symptom Ervin sees, WHERE to look first, and 
 
 - **Symptom:** ABERP → Auto-árazás row reaches `Extracting` then flips RED with `Failed`.
 - **WHERE:** click the row → detail pane → "Last error" (the Python stderr is captured there).
-- **Fix (STEP file):** "STEP extraction not yet implemented in v1" — v1 is STL-only (S269 deferred STEP; S292 in flight). Re-submit with an `.stl`. See Step 1 CAD-file note.
-- **Fix (material grade not in catalogue):** "material grade `X` is not in the catalogue snapshot" — the form's hardcoded dropdown doesn't match ABERP's seeded grades. Re-submit and type one of the eight grades listed in Step 1 (`6061-T6`, `7075-T651`, `304`, `316`, `Ti-6Al-4V`, `Inconel 718`, `PEEK`, `MONEL_650`). S289 (in flight) closes the catalogue-push gap.
+- **Fix (STEP file — assembly):** "STEP file contains an assembly with N solids; only single-part STEP is supported in v1" — the OCCT extractor (PROD_v2.27.8 / S292) rejects multi-solid STEP. Re-export from your CAD tool as a single-part STEP, or simplify to an STL.
+- **Fix (STEP file — no solid body):** "STEP file contains no solid body" — the file likely contains only surfaces / sheets / wireframes. Re-export with solid bodies, or send an STL.
+- **Fix (STEP file — could not be parsed):** "STEP file could not be parsed (OCCT ReadFile status=N)" — file is malformed. Re-export from a known-good tool, or fall back to STL.
+- **Fix (unsupported extension):** "Unsupported file extension '.iges'…" — the storefront accepts 11 formats but the extractor only handles `.stl` / `.step` / `.stp`. The `Permanent` badge tells the operator Retry will never help; the customer must re-upload in a supported format.
+- **Fix (material grade not in catalogue):** "material grade `X` is not in the catalogue snapshot" — the form's hardcoded dropdown doesn't match ABERP's seeded grades. Re-submit and type one of the eight grades listed in Step 1 (`6061-T6`, `7075-T651`, `304`, `316`, `Ti-6Al-4V`, `Inconel 718`, `PEEK`, `MONEL_650`). For local-dev, also click ABERP → Materials → "Teszt push" once to seed the local catalogue mirror (PROD_v2.27.5 / S289).
+- **Fix (margin floor violation):** "computed margin X below configured floor Y" — the engine's MarginFloor rule fired. The Pricing-job badge reads **"Operator review required"** (PROD_v2.27.9 / S297 F6 — distinct from the generic "Operator retry required"). Edit ABERP → Quoting Parameters → Margin profile BEFORE clicking Retry; Retry alone fails identically.
 - **Fix (other):** the CAD file is unparseable. Re-submit with a simpler shape (a cube STL). If a previously-working shape now fails, the OCCT extractor regressed — file under `[[aberp-python-auto-discovery]]` follow-up.
 
 ### Legacy orphan row from before daemon hardening (c1cf32 perpetually "Sikertelen / Failed")
@@ -424,7 +452,12 @@ For each predictable failure mode: symptom Ervin sees, WHERE to look first, and 
 - **Symptom:** anyone who upgraded from `PROD_v2.27.0` → `PROD_v2.27.4` sees a stuck row in **Auto-árazás** with id `c1cf32ed-72b6-4708-8abb-6359d27f042b` perpetually showing **"Sikertelen / Failed — STEP extraction not yet implemented"**.
 - **WHERE:** ABERP → Auto-árazás → the row predates the daemon's retry-policy hardening; the daemon retried the same STEP-extractor stub error 5 times before being calmed in `PROD_v2.27.4`.
 - **Fix:** **not a bug — just ignore it.** This is an orphan from before the hardening landed and has no live effect on new submissions.
-- **Advanced (operator-only):** if the visible row is annoying, delete it manually from ABERP's DuckDB shell:
+- **⚠️ After `PROD_v2.27.8` — c1cf32 Retry behavior changed.** S292 / PR-273 shipped the OCCT-backed STEP extractor. If you click **Retry** on the c1cf32 row "just to see":
+  1. **Valid single-part STEP, MM units** → the row advances to `Posted`, a priced PDF is rendered, and a "your quote is ready" email is queued to the _original customer_. If that's an old test inbox you don't care about, harmless; if it's a real address, the customer gets an unexpected email about an old quote.
+  2. **Assembly / no-solid STEP** → re-fails with classifier-Permanent verdict, badge stays.
+  3. **METRE / non-MM units STEP** → `PROD_v2.27.9` (S297 F2) silently converts to mm. Pre-`PROD_v2.27.9` would have produced a near-zero-volume quote.
+- **Recommendation:** **prefer the SQL DELETE below over Retry** until you have confirmed (a) the c1cf32 blob is a valid single-part MM-unit STEP AND (b) the original customer email is one you can safely email again.
+- **Advanced (operator-only):** delete the row manually from ABERP's DuckDB shell:
   ```sql
   DELETE FROM quote_pricing_jobs WHERE id = 'c1cf32ed-72b6-4708-8abb-6359d27f042b';
   ```

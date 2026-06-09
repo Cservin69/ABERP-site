@@ -39,6 +39,21 @@ type TransitionVerdict =
 	| { ok: false; status: 400 | 403 | 409; error: string };
 
 function checkTransition(from: string, to: QuoteStatus): TransitionVerdict {
+	// PR-10 / S297 F3 — idempotent same-state is a 200-noop on every
+	// status, BEFORE the forbidden-target gates. The S295 design
+	// correctly reserves `quoted` for POST /priced and `approved` for
+	// the customer accept POST, but the forbidden-target check WAS
+	// pre-empting `from === to` for those two states only — ABERP's
+	// intake daemon re-polling `POST /status {status:'approved'}` on
+	// an already-approved row received a hard 403 instead of a 200
+	// noop. The semantics are "ABERP is forbidden from being
+	// idempotent on the two states it most needs to be idempotent
+	// on". The typed-ACCEPT gate is preserved because the only path
+	// from `quoted → approved` is still the customer-accept POST;
+	// allowing `approved → approved` here does NOT widen who can set
+	// `approved` for the first time (S296 review F3).
+	if (from === to) return { ok: true, noop: true };
+
 	// `quoted` and `approved` are owned by other endpoints — refuse here
 	// regardless of source state so the rule is independent of timing.
 	if (to === 'quoted') {
@@ -62,12 +77,10 @@ function checkTransition(from: string, to: QuoteStatus): TransitionVerdict {
 	// everything else gates here.
 	const isTerminal = (s: string): boolean => TERMINAL_STATES.has(s as QuoteStatus);
 
-	// Idempotent same-state for in-flight intermediate states. `received →
-	// received` is a no-op too; `quoting → quoting` is the documented retry.
-	if (from === to) return { ok: true, noop: true };
-
 	if (to === 'quoting') {
-		if (from === 'received' || from === 'quoting') return { ok: true };
+		// `quoting → quoting` already returned noop at the top of this
+		// fn (PR-10 / S297 F3); only `received → quoting` reaches here.
+		if (from === 'received') return { ok: true };
 		return {
 			ok: false,
 			status: 409,
