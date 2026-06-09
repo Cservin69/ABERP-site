@@ -182,25 +182,87 @@ export const POST: RequestHandler = async ({ params, request }) => {
 
 	const meta = verdict.value;
 
-	// State-machine check. Per ADR-0004:
-	//   received | quoting → proceed (new priced write)
-	//   quoted, same hash  → 200 no-op (idempotent ABERP retry)
-	//   quoted, new hash   → 409 already_priced_with_different_hash
-	//   terminal           → 409 terminal_or_committed
+	// State-machine check. Per ADR-0004 (+ S323 stock-alert re-render relaxation):
+	//   received | quoting              → proceed (new priced write)
+	//   quoted, same hash, no flip      → 200 no-op (idempotent ABERP retry)
+	//   quoted, same hash, false→true   → overwrite PDF + flip stock_alert (S323)
+	//   quoted, new hash                → 409 already_priced_with_different_hash
+	//   terminal (incl. accepted/approved) → 409 terminal_or_committed
 	if (TERMINAL_STATES.has(existing.status)) {
 		return json({ error: 'terminal_or_committed', status: existing.status }, { status: 409 });
 	}
 	if (existing.status === 'quoted') {
-		if (existing.pricing?.feature_graph_hash === meta.feature_graph_hash) {
+		const prior = existing.pricing;
+		if (prior?.feature_graph_hash !== meta.feature_graph_hash) {
+			return json(
+				{
+					error: 'already_priced_with_different_hash',
+					feature_graph_hash: prior?.feature_graph_hash ?? null
+				},
+				{ status: 409 }
+			);
+		}
+		// Same hash. Default is an idempotent no-op (an ABERP retry of the same
+		// priced post). The one S323 exception is a *stock-alert re-render*:
+		// after the customer is quoted, a stock downgrade may flip the alert.
+		// ABERP re-renders priced.pdf with the banner and re-posts it carrying
+		// the SAME feature_graph_hash (geometry/pricing are unchanged) but
+		// stock_alert:true. The hash guards geometry/pricing identity, NOT the
+		// stock-status overlay, so a false→true transition must overwrite the
+		// stored PDF and flip pricing.stock_alert in place. A true→true (or any
+		// *→false) same-hash post stays a no-op — sticky, mirroring the ABERP
+		// recompute_stock_alert semantics, so the customer is never re-alerted
+		// twice for the same downgrade.
+		if (!(meta.stock_alert && prior.stock_alert !== true)) {
 			return json({ status: 'quoted', idempotent: true });
 		}
-		return json(
-			{
-				error: 'already_priced_with_different_hash',
-				feature_graph_hash: existing.pricing?.feature_graph_hash ?? null
-			},
-			{ status: 409 }
+
+		const rerenderBytes = new Uint8Array(await pdfBlob.arrayBuffer());
+		await writePricedPdfAtomic(id, rerenderBytes);
+
+		const rerenderAt = new Date().toISOString();
+		const rerenderPricing: QuotePricing = {
+			// Preserve the original priced identity (received_at, hash). Only the
+			// stock-status overlay and the artifact it lives on are refreshed; the
+			// freshly-validated meta fields are taken from the re-post so the
+			// stored record stays coherent with the re-rendered PDF.
+			...prior,
+			valid_until: meta.valid_until,
+			breakdown_json: meta.breakdown_json,
+			extractor_version: meta.extractor_version,
+			engine_version: meta.engine_version,
+			stock_alert: true
+		};
+		const rerendered: QuoteMetadata = {
+			...existing,
+			pricing: rerenderPricing,
+			status_history: [
+				...(existing.status_history ?? []),
+				{
+					at: rerenderAt,
+					from: 'quoted',
+					to: 'quoted',
+					notes: `Stock-alert re-render: priced.pdf overwritten, stock_alert flipped true by ${meta.engine_version}`
+				}
+			]
+		};
+		await writeQuoteAtomic(id, rerendered);
+
+		// Audit trace for the re-render (S323). The customer HTML banner
+		// (/q/[id]) and the re-rendered PDF both now reflect stock_alert:true;
+		// this is the only server-side record that the false→true overwrite
+		// happened on a same-hash post, so future investigation has a trail.
+		console.info(
+			'[priced] quote.priced_pdf_rerendered',
+			JSON.stringify({
+				event: 'quote.priced_pdf_rerendered',
+				id,
+				feature_graph_hash: meta.feature_graph_hash,
+				stock_alert: true
+			})
 		);
+
+		return json({ status: 'quoted', rerendered: true });
 	}
 	if (existing.status !== 'received' && existing.status !== 'quoting') {
 		return json({ error: 'unexpected source state', status: existing.status }, { status: 409 });
