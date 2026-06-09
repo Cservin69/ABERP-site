@@ -46,20 +46,19 @@ jobs:
       - run: npm run lint
       # S313 / PR-14: the Test step gets its own 5-min ceiling so a vitest
       # non-termination fails RED here (clearly attributed) instead of dragging
-      # the whole job to its 15-min cap with an ambiguous cause.
+      # the whole job to its 15-min cap with an ambiguous cause. KEPT as
+      # defense-in-depth — even with the S315 root-cause fix below, the backstop
+      # catches any future regression in minutes rather than hours.
       #
-      # `--no-file-parallelism` serializes the vitest run. This is a HEURISTIC
-      # mitigation: the S313 investigation could NOT reproduce the reported
-      # hang locally (clean exit, 351 tests, ~2.3s) on either Node 25 (macOS)
-      # or Node 20.19.4 (the version CI's `node-version: '20'` resolves to),
-      # and the 26f7e0c diff contains no timers/watchers/intervals/background
-      # promises — so a leaked-handle root cause is not supported by evidence.
-      # The leading remaining hypothesis is worker over-subscription / a
-      # plugin-teardown deadlock under the forks pool on the 2-core hosted
-      # runner; serializing sidesteps that class of hang. If it proves
-      # unnecessary, deleting the flag is a one-line revert (no config change).
+      # S315 / PR-15: the PR-14 `--no-file-parallelism` heuristic is removed.
+      # It was a guess at the forks-pool hang and did not cure it. The real fix
+      # lives in vite.config.ts (`pool: 'threads'` for the server project): the
+      # 2-core-runner-only hang was a `forks`-pool teardown deadlock, and the
+      # threads pool has no child-process exit handshake to deadlock on. With
+      # that in place the natural parallel run is safe again, so we get the
+      # speed back.
       - name: Test
-        run: npm run test:unit -- --run --no-file-parallelism
+        run: npm run test:unit -- --run
         timeout-minutes: 5
       - run: npm run build
       - name: Sanity-check build output
