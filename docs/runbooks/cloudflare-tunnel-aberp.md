@@ -4,7 +4,9 @@
 
 **Time budget:** ~60–90 minutes if nothing goes wrong, more if you hit something in §11.
 
-**Reversibility:** every step is undoable. `cloudflared tunnel delete aberp` removes the tunnel. The Route 53 CNAME can be deleted from the AWS Console. `/etc/aberp-site.env` is a plain text file you can hand-edit back. No customer data is touched.
+**Reversibility:** every step is undoable. `sudo cloudflared service uninstall` removes the connector daemon from the Mac; the tunnel itself can then be deleted from the Zero Trust dashboard (**Networks → Tunnels → aberp → Delete**). The Route 53 CNAME can be deleted from the AWS Console. `/etc/aberp-site.env` is a plain text file you can hand-edit back. No customer data is touched.
+
+**Important context:** this walkthrough assumes your DNS is on AWS Route 53 (the common case for AWS-hosted setups) and uses Cloudflare's Zero Trust token-based tunnel flow. The token-based flow is universal — it works whether your DNS is on Cloudflare or anywhere else. If your DNS IS on Cloudflare, the legacy `cloudflared tunnel login` + automatic CNAME flow also works (see Cloudflare's official quickstart); we use the token-based path here because it's the one path that always works regardless of where DNS lives.
 
 ---
 
@@ -86,7 +88,9 @@ If you don't already have an account, click "Sign Up" and create one. The free t
 
 ---
 
-## §3 — Install and authenticate `cloudflared`
+## §3 — Install `cloudflared` via the Zero Trust dashboard
+
+This walkthrough uses Cloudflare's Zero Trust token-based tunnel flow. The token install command bundles the connector daemon with its credentials in one paste — no `cloudflared tunnel login` browser dance, no `cert.pem`, no zone-picking. This is the universal path that works whether your DNS is on Cloudflare or somewhere else (in our case, Route 53).
 
 ### S-1 — Install `cloudflared`
 
@@ -98,9 +102,7 @@ brew install cloudflared
 
 Expected: the install finishes after 1–2 minutes with a line starting `🍺 /opt/homebrew/Cellar/cloudflared/...`.
 
-### S-2 — Confirm `cloudflared` is installed
-
-**WHERE:** Mac terminal.
+Confirm:
 
 ```sh
 cloudflared --version
@@ -108,79 +110,87 @@ cloudflared --version
 
 Expected: a line like `cloudflared version 2024.x.x ...` (or newer).
 
-### S-3 — Start the Cloudflare login flow
+### S-2 — Sign into the Zero Trust dashboard
+
+**WHERE:** Browser tab at <https://one.dash.cloudflare.com>.
+
+Sign in with the Cloudflare account from preflight P-6. If you've never opened Zero Trust before, the dashboard walks you through a free signup (pick a team name, choose the **Free** plan, no payment method required).
+
+Expected: the Zero Trust dashboard loads, with a left-nav listing **Networks**, **Access**, **Gateway**, etc.
+
+### S-3 — Create the tunnel in the dashboard
+
+**WHERE:** Zero Trust dashboard.
+
+Click **Networks → Tunnels** in the left nav, then click **Create a tunnel** (top right).
+
+- **Connector type:** pick **Cloudflared**. (Not WARP.)
+- **Tunnel name:** type `aberp`.
+- Click **Save tunnel**.
+
+Expected: the page advances to "Install and run a connector" with a platform picker (macOS / Linux / Windows / Docker) and a one-line install command below it.
+
+### S-4 — Copy the install command
+
+**WHERE:** Zero Trust dashboard, "Install and run a connector" page.
+
+Pick the **macOS** tab. The page shows a one-liner that looks like:
+
+```
+sudo cloudflared service install eyJhIjoi... (~200 characters of base64)
+```
+
+Click the copy icon next to the command (preferred — copying by hand can drop characters at either end). The token is long; make sure you got all of it.
+
+### S-5 — Run the install command on the Mac
 
 **WHERE:** Mac terminal.
 
-```sh
-cloudflared tunnel login
-```
+Paste the command from S-4 and press Enter. You'll be prompted for your Mac password (this is `sudo`).
 
-Expected: the terminal prints a URL, then a browser tab opens to that URL automatically. If the browser does not open, copy the URL out of the terminal and paste it into a browser manually.
+Expected: a line like `1 service was installed and started successfully`. The cloudflared daemon is now running as a launchd service in the background — you do not need to launch anything else by hand.
 
-### S-4 — Authorize `cloudflared`, then close the tab without picking a zone
+**Stuck?** If the install fails with a token parse error, the token got truncated when you copied it. Go back to S-4 and use the dashboard's copy icon. See also §11 T13.
 
-**WHERE:** the browser tab that just opened.
+### S-6 — Confirm the connector shows healthy in the dashboard
 
-Sign into your Cloudflare account. Cloudflare will ask you to pick a zone to authorize. **DO NOT pick a zone.** Just close the tab.
+**WHERE:** Zero Trust dashboard. The page you copied the token from should still be open; if not, navigate back to **Networks → Tunnels** and click the `aberp` row.
 
-Why: zone-picking is for Cloudflare-managed DNS. Our DNS is on Route 53. `cloudflared` only needs to know which Cloudflare account it's in; it does not need DNS authority. Picking a zone here adds no capability and might confuse a later step.
+Wait ~10 seconds, then refresh the page. Look at the **Connectors** section near the top of the tunnel detail page.
 
-**WHERE:** back in the Mac terminal. After a few seconds you should see:
+Expected: one row with status **HEALTHY** (green dot). The hostname column shows your Mac's hostname.
 
-```
-You have successfully logged in.
-```
-
-### S-5 — Confirm the login created a credential file
-
-**WHERE:** Mac terminal.
-
-```sh
-ls ~/.cloudflared/
-```
-
-Expected: at least one file ending in `.pem` (your Cloudflare account credential).
+**Stuck?** If the connector stays **DOWN** for more than 30 seconds, see §11 T13.
 
 ---
 
-## §4 — Create the tunnel and capture the UUID
+## §4 — Capture the tunnel UUID
 
-### T-1 — Create a tunnel called `aberp`
+The dashboard already created the tunnel in §3 S-3. We just need its UUID for the Route 53 CNAME (§5) and the local config file (§6).
+
+### T-1 — Copy the UUID from the dashboard
+
+**WHERE:** Zero Trust dashboard → **Networks → Tunnels** → click the `aberp` row.
+
+Look at the top of the tunnel detail page. Under (or next to) the tunnel name `aberp` you'll see a long hex string with dashes:
+
+```
+abc12345-1234-1234-1234-abcdef123456
+```
+
+That's the UUID. Click it (or the copy icon next to it) to copy it to the clipboard. **Save it somewhere you can paste it back from twice** — once in §5 R-3, once in §6 C-2.
+
+### T-2 — Confirm the connector daemon is running
 
 **WHERE:** Mac terminal.
 
 ```sh
-cloudflared tunnel create aberp
+sudo launchctl list | grep cloudflared
 ```
 
-Expected: a line like:
+Expected: at least one line showing `com.cloudflare.cloudflared` with a numeric PID (not `-`). This is the daemon installed by §3 S-5; if it isn't listed, see §11 T13.
 
-```
-Created tunnel aberp with id abc12345-1234-1234-1234-abcdef123456
-```
-
-**Copy that UUID** (the long hex string with dashes). You will paste it into two places in the next sections. Write it down somewhere you can find again.
-
-### T-2 — Confirm the tunnel exists
-
-**WHERE:** Mac terminal.
-
-```sh
-cloudflared tunnel list
-```
-
-Expected: a row showing `aberp` with the UUID you just copied.
-
-### T-3 — Confirm the tunnel's secret credential file exists
-
-**WHERE:** Mac terminal. Replace `<UUID>` with your UUID from T-1.
-
-```sh
-ls ~/.cloudflared/<UUID>.json
-```
-
-Expected: the path is printed (file exists). This is the tunnel's secret. Don't share it.
+Note: the legacy `cloudflared tunnel list` command needs a `cert.pem` from the old browser-login flow and will not work under the token-based path. The dashboard is the source of truth for tunnel inventory; the `launchctl list` check above is the local-side equivalent of "is it running."
 
 ---
 
@@ -258,7 +268,7 @@ Expected: exactly 1 line. This confirms the CNAME exists and points at Cloudflar
 mkdir -p ~/.cloudflared && open ~/.cloudflared
 ```
 
-Expected: a Finder window opens, showing whatever is in `~/.cloudflared/` (probably your cert from §3 and your tunnel credential from §4).
+Expected: a Finder window opens, showing whatever is in `~/.cloudflared/` (likely empty or close to it under the token-based flow — the daemon's credentials live with the launchd service, not in this directory).
 
 ### C-2 — Write `config.yml`
 
@@ -269,7 +279,6 @@ We need a text file at `~/.cloudflared/config.yml`. The easiest way is to paste 
 ```sh
 cat > ~/.cloudflared/config.yml <<'EOF'
 tunnel: REPLACE-WITH-UUID
-credentials-file: /Users/aben/.cloudflared/REPLACE-WITH-UUID.json
 
 ingress:
   - hostname: aberp.abenerp.com
@@ -292,7 +301,9 @@ Confirm it worked:
 cat ~/.cloudflared/config.yml
 ```
 
-Expected: the file contents, with your UUID substituted in twice (on the `tunnel:` line and inside the `credentials-file:` path). No `REPLACE-WITH-UUID` literal text should remain.
+Expected: the file contents, with your UUID substituted onto the `tunnel:` line. No `REPLACE-WITH-UUID` literal text should remain.
+
+**Note on token-based connector + local YAML.** If you used the token-based install in §3 (the recommended path for Route 53 DNS users), `config.yml` routing still works — the token authenticates the connector daemon, the YAML configures what it forwards. There is no `credentials-file:` line because the token (stored in the launchd service definition by §3 S-5) does that job. The Zero Trust dashboard's "Public Hostnames" tab is an alternative way to express the same routing, but that tab requires picking a Cloudflare-managed zone from a dropdown — empty when DNS is on Route 53. So we use local YAML instead. The local YAML takes precedence over the dashboard's Public Hostnames config when both are present.
 
 **About the port `18443`.** That's the port ABERP listens on when launched via `./run/dev-test.sh` from the ABERP repo. If you launch ABERP some other way (the Cowork install path, `./run/upgrade_prod.sh`, etc.), ABERP picks a different port every restart and this config will not match it. To get a predictable port that matches this config, launch ABERP via:
 
@@ -316,19 +327,33 @@ Expected: `OK`.
 
 ---
 
-## §7 — Run the tunnel and verify
+## §7 — Reload the daemon and verify
 
-### V-1 — Start the tunnel in the foreground
+### V-1 — Reload the daemon to pick up `config.yml`
 
 **WHERE:** Mac terminal.
 
+The launchd service installed in §3 S-5 has been running since then, but it started before you wrote `config.yml` in §6, so kick it to reload:
+
 ```sh
-cloudflared tunnel run aberp
+sudo launchctl kickstart -k system/com.cloudflare.cloudflared
 ```
 
-Expected: a stream of `INF` log lines. Within ~10 seconds you should see four lines that include `Registered tunnel connection` — one per Cloudflare edge data center the tunnel connected to.
+Then confirm it's still running:
 
-Leave this terminal window open. The tunnel is running here in the foreground for now. You'll background it as a launchd service in §8.
+```sh
+sudo launchctl list | grep cloudflared
+```
+
+Expected: one line showing `com.cloudflare.cloudflared` with a numeric PID (not `-`). The daemon now serves the ingress rules from §6. (If you already ran the same `launchctl list` check in §3 S-6 or §4 T-2 and you don't need to reload, this whole step is a no-op.)
+
+If you want to watch live connector logs in another window:
+
+```sh
+sudo log stream --predicate 'process == "cloudflared"' --level info
+```
+
+You should see several `Registered tunnel connection` lines — one per Cloudflare edge data center the tunnel connected to. Cmd+C the tail when you've seen those; the daemon keeps running.
 
 ### V-2 — Check that the tunnel reaches ABERP
 
@@ -340,7 +365,7 @@ curl -i https://aberp.abenerp.com/health 2>&1 | head -20
 
 Expected: either an HTTP `200 OK` with a JSON body, or an HTTP `401 Unauthorized` (depending on whether `/health` requires auth in your ABERP build). What you must NOT see: a TLS error, an HTTP `502 Bad Gateway`, or "connection refused / timed out."
 
-**Stuck?** Check the first terminal window (the one running `cloudflared tunnel run aberp`) for error lines. The most common failure here is that ABERP isn't actually running on port 18443. Confirm with `lsof -nP -i4TCP -sTCP:LISTEN -c aberp` — you should see `127.0.0.1:18443` in the output.
+**Stuck?** Tail the connector logs in a separate window with `sudo log stream --predicate 'process == "cloudflared"' --level info` and re-run the curl. The most common failure here is that ABERP isn't actually running on port 18443 — the log will show a connection-refused line. Confirm with `lsof -nP -i4TCP -sTCP:LISTEN -c aberp` — you should see `127.0.0.1:18443` in the output.
 
 ### V-3 — Check that the email relay endpoint is reachable through the tunnel
 
@@ -392,29 +417,11 @@ Expected: HTTP `200 OK` with a JSON body containing `"audit_id":"..."`. Then che
 
 ---
 
-## §8 — Install the tunnel as a launchd service
+## §8 — Service management reference
 
-This makes the tunnel survive reboots and lid-close. After this, you can stop thinking about the foreground terminal window from V-1.
+The launchd service was installed in §3 S-5 by the token-based one-liner. It runs in the background, survives reboots and lid-close, and starts at boot. This section is a reference for managing it later — you don't need to do anything here for the initial bring-up.
 
-### L-1 — Stop the foreground tunnel
-
-**WHERE:** the FIRST Mac terminal (the one running `cloudflared tunnel run aberp`).
-
-Press `Ctrl+C`. The tunnel stops cleanly.
-
-### L-2 — Install the launchd service
-
-**WHERE:** Mac terminal (either window).
-
-```sh
-sudo cloudflared service install
-```
-
-You'll be prompted for your Mac password.
-
-Expected: a line like `1 service was installed and started successfully`. The service now runs in the background and starts at boot.
-
-### L-3 — Confirm the service is loaded
+### L-1 — Confirm the service is loaded
 
 **WHERE:** Mac terminal.
 
@@ -422,9 +429,29 @@ Expected: a line like `1 service was installed and started successfully`. The se
 sudo launchctl list | grep cloudflared
 ```
 
-Expected: at least one line showing the cloudflared service is loaded with a numeric PID (not `-`).
+Expected: one line showing `com.cloudflare.cloudflared` with a numeric PID (not `-`). Same check as §3 S-6 and §7 V-1.
 
-**To stop the service later:** `sudo cloudflared service uninstall`.
+### L-2 — Restart the service after editing `config.yml`
+
+**WHERE:** Mac terminal.
+
+```sh
+sudo launchctl kickstart -k system/com.cloudflare.cloudflared
+```
+
+Use this whenever you change `~/.cloudflared/config.yml` (e.g., to point at a different ABERP port). The daemon does not hot-reload the YAML.
+
+### L-3 — Stop or uninstall the service
+
+**WHERE:** Mac terminal.
+
+To stop and remove the service entirely:
+
+```sh
+sudo cloudflared service uninstall
+```
+
+To reinstall, copy a fresh one-liner from the Zero Trust dashboard (§3 S-4) and re-run it.
 
 ---
 
@@ -624,15 +651,31 @@ If you got here without falling out at any step, **the prod-prod pipeline is liv
 
 ## §11 — Troubleshooting
 
-### T1 — `cloudflared tunnel run aberp` fails with "Couldn't open the config file"
+### T1 — Connector daemon is healthy in the dashboard but `https://aberp.abenerp.com` returns HTTP 530 / "no route to backend"
 
-**Diagnostic:**
+The daemon is running but it isn't picking up the local `~/.cloudflared/config.yml`. Most common causes, in order:
 
-```sh
-ls ~/.cloudflared/config.yml
-```
+1. The config file is missing. Confirm:
 
-If the file is missing, re-run §6 step C-2.
+   ```sh
+   ls ~/.cloudflared/config.yml
+   ```
+
+   If missing, re-run §6 step C-2.
+
+2. The config file exists but the daemon was started before you wrote it. Reload:
+
+   ```sh
+   sudo launchctl kickstart -k system/com.cloudflare.cloudflared
+   ```
+
+3. The YAML is malformed. Validate:
+
+   ```sh
+   cloudflared tunnel ingress validate
+   ```
+
+   Fix any error it prints, then kickstart again.
 
 ### T2 — `dig aberp.abenerp.com +short` returns empty
 
@@ -682,9 +725,9 @@ Same root cause as T6 — tunnel up, but ABERP not reachable on the expected por
 
 Your AWS credentials don't include Route 53 read/write. You need a different IAM user or role with `route53:ChangeResourceRecordSets` and `route53:ListHostedZones`. Ask the account holder.
 
-### T9 — `cloudflared tunnel login` opened the wrong Cloudflare account
+### T9 — You signed into the wrong Cloudflare account in the Zero Trust dashboard
 
-Sign out of Cloudflare at <https://dash.cloudflare.com> first, then re-run `cloudflared tunnel login`. The browser tab will open against whichever account you sign into next.
+The token you copied in §3 S-4 is bound to the account where you created the tunnel. If that was the wrong account, the connector will appear in the wrong place (and may consume free-tier quota you didn't intend). Uninstall the service (`sudo cloudflared service uninstall`), sign out at <https://one.dash.cloudflare.com>, sign back in with the right account, and redo §3 S-2 through S-6.
 
 ### T10 — Pilot price PDF arrives but the email body is English only (not bilingual)
 
@@ -695,6 +738,28 @@ cd /path/to/aberp-site && git log -1 --oneline
 ```
 
 If you see a commit older than `81afac2`, run `git pull origin main` (re-do D-2) and restart the service (D-5).
+
+### T11 — `cloudflared tunnel login` hangs at "Waiting for login..." indefinitely
+
+You followed the legacy cert-based login flow (the one not used by this runbook). That flow requires authorizing at least one Cloudflare-managed DNS zone in the browser tab Cloudflare opens; if your DNS lives outside Cloudflare (e.g., Route 53), no zone appears, the "Authorize" button never shows up, and the terminal loops forever. Stop the legacy command (Ctrl+C) and use the Zero Trust token-based flow in §3 instead — that flow does not need a Cloudflare-managed zone.
+
+### T12 — Zero Trust dashboard says "Domain not found" when adding a public hostname
+
+The dashboard's **Public Hostnames** tab can only attach hostnames to Cloudflare-managed DNS zones. Your DNS is on Route 53, so the dropdown is empty (or doesn't list `abenerp.com`). Skip the dashboard tab entirely; route via local `~/.cloudflared/config.yml` per §6. After editing the YAML, kickstart the daemon (§7 V-1 or §8 L-2).
+
+### T13 — After running the token install command, `launchctl list | grep cloudflared` returns nothing
+
+The install command failed silently — almost always because the token got truncated when you copied it from the dashboard. The token is ~200 characters of base64; if you grabbed only part of it, `cloudflared service install` parses successfully but no service ends up registered.
+
+Re-copy the FULL one-liner from the Zero Trust dashboard (§3 S-4) — use the copy icon next to the command rather than selecting it by hand, since manual selection routinely drops characters at either end. Paste and re-run.
+
+If `launchctl list` still shows nothing, run the install command WITHOUT `sudo` to see the error message that the launchd registration is suppressing:
+
+```sh
+cloudflared service install <paste-token-here>
+```
+
+The error tells you whether it's a malformed token, an account-permissions problem, or something else.
 
 ---
 
