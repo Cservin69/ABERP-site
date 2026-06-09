@@ -1,7 +1,8 @@
 # ADR 0007 — Storefront customer email relays through ABERP (`POST /api/internal/send-email`)
 
-**Status:** Accepted (2026-06-07, S280 / PR-04-doc).
+**Status:** **Superseded** by [ADR-0009](0009-storefront-as-queue-no-tunnel.md) (2026-06-09, S305). Originally Accepted 2026-06-07, S280 / PR-04-doc.
 **Supersedes:** [ADR-0006](0006-local-smtp-send-no-relay.md).
+**Superseded by:** [ADR-0009](0009-storefront-as-queue-no-tunnel.md) — the push-based relay was correct in principle but Ervin's threat model rejected the third-party-network path that [ADR-0008](0008-aberp-storefront-network-topology.md) ended up requiring to make the push work in prod. ADR-0009 replaces the push (`POST /api/internal/send-email`) with a pull-based queue (`GET /api/internal/email-queue?since=...` on the storefront, polled by ABERP). The SPOC outcome this ADR fought for — single sender identity, single SMTP credential on ABERP, single audit lineage — is preserved unchanged; only the call direction reverses.
 **Design doc:** [`docs/design/storefront-auto-quote-pipeline.md`](../design/storefront-auto-quote-pipeline.md) §9.
 
 ## Context

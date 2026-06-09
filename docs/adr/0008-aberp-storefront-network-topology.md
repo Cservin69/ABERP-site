@@ -1,9 +1,10 @@
 # ADR 0008 — Storefront ↔ ABERP network topology in prod
 
-**Status:** Accepted — **Option B (Cloudflare Tunnel)** (2026-06-08, Ervin's approval; recorded S301). Originally proposed earlier the same day (S299) as recommendation pending operator pick.
-**Related:** [ADR-0004](0004-priced-quote-writeback.md) (priced-quote writeback path), [ADR-0007](0007-storefront-email-relay-via-aberp.md) (email relay path).
-**Walkthrough flag:** [`docs/walkthroughs/end-to-end-auto-quote-test.md`](../walkthroughs/end-to-end-auto-quote-test.md) §"What's NOT in this walkthrough" OQ #3.
-**Runbook:** [`docs/runbooks/cloudflare-tunnel-aberp.md`](../runbooks/cloudflare-tunnel-aberp.md) — step-by-step `cloudflared` bring-up.
+**Status:** **Superseded** by [ADR-0009](0009-storefront-as-queue-no-tunnel.md) (2026-06-09, S305). Originally Accepted — **Option B (Cloudflare Tunnel)** — 2026-06-08, Ervin's approval, recorded S301; proposed earlier the same day (S299).
+**Superseded by:** [ADR-0009](0009-storefront-as-queue-no-tunnel.md) — Cloudflare Tunnel was the operator-time-cheapest path to close the storefront → ABERP connectivity gap, but it introduces a vendor in the customer-data + email path that Ervin's threat model rejected the morning after this ADR was Accepted ("I am paranoid about security but that means I do not trust cloudflare neither"). ADR-0009 picks the [Option D](#option-d--storefront-as-queue-aberp-polls-no-inbound-to-aberp-at-all) fallback documented in this ADR — storefront-as-queue, ABERP polls outbound only — as the actual implementation. **No `cloudflared` daemon was ever brought up against prod**; the runbook at `docs/runbooks/cloudflare-tunnel-aberp.md` will be removed in a follow-up session.
+**Related:** [ADR-0004](0004-priced-quote-writeback.md) (priced-quote writeback path), [ADR-0007](0007-storefront-email-relay-via-aberp.md) (email relay path, also superseded by ADR-0009).
+**Walkthrough flag:** [`docs/walkthroughs/end-to-end-auto-quote-test.md`](../walkthroughs/end-to-end-auto-quote-test.md) §"What's NOT in this walkthrough" OQ #3 — closed by [ADR-0009](0009-storefront-as-queue-no-tunnel.md) instead.
+**Runbook:** [`docs/runbooks/cloudflare-tunnel-aberp.md`](../runbooks/cloudflare-tunnel-aberp.md) — superseded; do not execute. Pending deletion.
 
 ## Decision recorded
 
