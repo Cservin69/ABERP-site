@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 
 // ES module imports are hoisted above any top-level statements, so we MUST set
 // the env var before the store module is evaluated. Doing it inline at the top
@@ -232,5 +233,49 @@ describe('readCatalogueSnapshot / writeCatalogueAtomic round-trip', () => {
 		expect(grades.has('AL_6061_T6')).toBe(true);
 		expect(grades.has('TI_6AL_4V')).toBe(true);
 		expect(grades.has('UNKNOWN')).toBe(false);
+	});
+});
+
+// S343 — the catalogue dir must resolve to an ABSOLUTE path outside the
+// immutable release dir, mirroring the email-outbox fix (S311). The old
+// `./data/catalogue` default resolved inside the read-only release dir and
+// every /api/catalogue/materials PUT failed with EROFS.
+describe('resolveCatalogueDir (S343)', () => {
+	// These tests mutate process.env.ABERP_SITE_CATALOGUE_DIR, which the
+	// module-level setup pins to TMP_ROOT for the round-trip suites. Restore it
+	// after each test so the rest of the file keeps writing into TMP_ROOT.
+	const RESTORE = process.env.ABERP_SITE_CATALOGUE_DIR;
+	afterEach(() => {
+		process.env.ABERP_SITE_CATALOGUE_DIR = RESTORE;
+	});
+
+	it('s343_resolves_default_when_env_unset', async () => {
+		const { resolveCatalogueDir } = await loadStore();
+		delete process.env.ABERP_SITE_CATALOGUE_DIR;
+		expect(resolveCatalogueDir()).toBe('/home/aberp/data/catalogue');
+	});
+
+	it('s343_resolves_env_when_set', async () => {
+		const { resolveCatalogueDir } = await loadStore();
+		process.env.ABERP_SITE_CATALOGUE_DIR = '/home/aberp/data/catalogue-override';
+		expect(resolveCatalogueDir()).toBe('/home/aberp/data/catalogue-override');
+	});
+
+	it('s343_rejects_non_absolute_env', async () => {
+		const { resolveCatalogueDir } = await loadStore();
+		process.env.ABERP_SITE_CATALOGUE_DIR = './data/catalogue';
+		expect(() => resolveCatalogueDir()).toThrow(/absolute/);
+	});
+
+	it('s343_write_creates_missing_dir_via_recursive_mkdir', async () => {
+		const { writeCatalogueAtomic, readCatalogueSnapshot } = await loadStore();
+		// A nested path that does NOT yet exist — recursive mkdir must create it.
+		const nested = resolve(TMP_ROOT, `missing-${randomUUID()}`, 'sub', 'dir');
+		process.env.ABERP_SITE_CATALOGUE_DIR = nested;
+		const materials = [goodRow()];
+		await writeCatalogueAtomic({ materials, received_at: '2026-06-10T00:00:00Z' });
+		const snap = await readCatalogueSnapshot();
+		expect(snap).not.toBeNull();
+		expect(snap?.materials).toEqual(materials);
 	});
 });

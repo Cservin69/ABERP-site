@@ -9,6 +9,7 @@ import { isAbsolute, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { verifyBodySizeLimit } from './body-size-limit';
 import { OUTBOX_DIR_DEFAULT_PATH } from './email-outbox';
+import { CATALOGUE_DIR_DEFAULT_PATH } from './catalogue-store';
 
 /**
  * Refuse-to-start boot checks. The S285 review flagged two
@@ -64,6 +65,7 @@ interface BootCheckOptions {
 		BODY_SIZE_LIMIT: string;
 		ABERP_SITE_OPERATOR_EMAIL: string;
 		ABERP_SITE_EMAIL_OUTBOX_DIR: string;
+		ABERP_SITE_CATALOGUE_DIR: string;
 	}>;
 	/**
 	 * Override the outbox-dir writability probe — tests stub this so they can
@@ -71,6 +73,12 @@ interface BootCheckOptions {
 	 * chmod-444 tmpdirs (which behave inconsistently across CI runners).
 	 */
 	outboxDirProbe?: (dir: string) => OutboxDirProbeResult;
+	/**
+	 * Override the catalogue-dir writability probe — same rationale as
+	 * `outboxDirProbe`. Reuses the `probeOutboxDirSync` round-trip (mkdir +
+	 * W_OK + sentinel) when unset.
+	 */
+	catalogueDirProbe?: (dir: string) => OutboxDirProbeResult;
 }
 
 export type OutboxDirProbeResult = { ok: true } | { ok: false; reason: string };
@@ -152,6 +160,41 @@ function checkOutboxDir(
 }
 
 /**
+ * ## S343 / F-CAT — catalogue dir writability
+ *
+ * Same shape as F15, for the material catalogue snapshot. `catalogue-store.ts`
+ * defaulted to the process-CWD-relative `./data/catalogue`, which `pathResolve`
+ * anchored inside the immutable release dir on Lightsail (`ProtectSystem=strict`,
+ * `ReadWritePaths=/home/aberp/data`). Every PUT to `/api/catalogue/materials`
+ * then failed with `EROFS` and the `/quote` dropdown never populated. The
+ * default is now `/home/aberp/data/catalogue`, the same canonical state dir as
+ * the outbox, and F-CAT proves the directory is absolute, present, and writable
+ * at boot using the same `probeOutboxDirSync` round-trip.
+ */
+function checkCatalogueDir(
+	env: BootCheckOptions['env'],
+	probe: BootCheckOptions['catalogueDirProbe']
+): BootCheckProblem | null {
+	const raw =
+		env?.ABERP_SITE_CATALOGUE_DIR ??
+		process.env.ABERP_SITE_CATALOGUE_DIR ??
+		CATALOGUE_DIR_DEFAULT_PATH;
+	const probeFn = probe ?? probeOutboxDirSync;
+	const result = probeFn(raw);
+	if (result.ok) return null;
+	return {
+		finding: 'F-CAT',
+		message:
+			`[aberp-site] ABERP_SITE_CATALOGUE_DIR="${raw}" is not usable: ` +
+			`${result.reason}. ` +
+			`Set it to ${CATALOGUE_DIR_DEFAULT_PATH} (the same canonical state dir as the ` +
+			`email outbox) and make sure the systemd unit's ReadWritePaths includes ` +
+			`/home/aberp/data. Release dirs are immutable (ProtectSystem=strict), so a ` +
+			`CWD-relative catalogue path fails every /api/catalogue/materials PUT with EROFS.`
+	};
+}
+
+/**
  * Pure verification — does not throw or exit. Returns a verdict the caller
  * (hooks.server.ts) decides what to do with.
  */
@@ -168,6 +211,9 @@ export function runBootChecks(opts: BootCheckOptions = {}): BootCheckResult {
 
 	const outboxProblem = checkOutboxDir(opts.env, opts.outboxDirProbe);
 	if (outboxProblem) problems.push(outboxProblem);
+
+	const catalogueProblem = checkCatalogueDir(opts.env, opts.catalogueDirProbe);
+	if (catalogueProblem) problems.push(catalogueProblem);
 
 	return { ok: problems.length === 0, problems };
 }

@@ -1,8 +1,40 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { resolve as pathResolve, join, dirname } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-const CATALOGUE_DIR = process.env.ABERP_SITE_CATALOGUE_DIR ?? './data/catalogue';
+/**
+ * Canonical catalogue state dir. S343 — `writeCatalogueAtomic` previously
+ * resolved a process-CWD-relative `./data/catalogue`, which `pathResolve`
+ * anchored INSIDE the immutable release directory on Lightsail. The systemd
+ * unit runs `ProtectSystem=strict` and only whitelists `/home/aberp/data` +
+ * `/mnt/aberp-data` under `ReadWritePaths=`, so every PUT to
+ * `/api/catalogue/materials` failed with `EROFS: read-only file system` and
+ * the `/quote` dropdown never populated. This is the same path-resolution
+ * defect S311 fixed for the email outbox (see `email-outbox.ts`); same fix,
+ * same canonical state dir, same boot-check posture (F-CAT in
+ * `boot-checks.ts`). Application state must live OUTSIDE any release dir.
+ */
+const CATALOGUE_DIR_DEFAULT = '/home/aberp/data/catalogue';
+
+/**
+ * Resolve the catalogue dir at call time (not module-load) so tests and the
+ * systemd unit can override via `ABERP_SITE_CATALOGUE_DIR`. Throws on a
+ * relative path — a CWD-relative path silently lands inside the read-only
+ * release dir, which is exactly the bug this guards against.
+ */
+export function resolveCatalogueDir(): string {
+	const raw = process.env.ABERP_SITE_CATALOGUE_DIR ?? CATALOGUE_DIR_DEFAULT;
+	if (!isAbsolute(raw)) {
+		throw new Error(
+			`ABERP_SITE_CATALOGUE_DIR must be an absolute path; got "${raw}". ` +
+				'A process-CWD-relative path resolves inside the immutable release dir (EROFS).'
+		);
+	}
+	return raw;
+}
+
+/** Exported so boot-checks can mention the canonical default in error copy. */
+export const CATALOGUE_DIR_DEFAULT_PATH = CATALOGUE_DIR_DEFAULT;
 
 export const STOCK_STATUSES = [
 	'in_stock',
@@ -139,7 +171,7 @@ export function validateSnapshotBody(body: unknown): SnapshotValidation {
 }
 
 function catalogueFile(): string {
-	return pathResolve(join(CATALOGUE_DIR, 'materials.json'));
+	return join(resolveCatalogueDir(), 'materials.json');
 }
 
 export async function readCatalogueSnapshot(): Promise<CatalogueSnapshot | null> {
@@ -154,8 +186,9 @@ export async function readCatalogueSnapshot(): Promise<CatalogueSnapshot | null>
 }
 
 export async function writeCatalogueAtomic(snapshot: CatalogueSnapshot): Promise<void> {
-	const target = catalogueFile();
-	await mkdir(dirname(target), { recursive: true });
+	const dir = resolveCatalogueDir();
+	await mkdir(dir, { recursive: true });
+	const target = join(dir, 'materials.json');
 	const tmp = `${target}.tmp-${randomUUID()}`;
 	await writeFile(tmp, JSON.stringify(snapshot, null, 2), 'utf8');
 	await rename(tmp, target);

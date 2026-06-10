@@ -175,3 +175,11 @@ If any of (1)–(3) fail under this architecture, the ADR should be reopened.
 - [ADR-0008](0008-aberp-storefront-network-topology.md) — **SUPERSEDED** by this ADR.
 - [`docs/runbooks/cloudflare-tunnel-aberp.md`](../runbooks/cloudflare-tunnel-aberp.md) — to be deleted in a follow-up session now that this ADR is accepted.
 - [`docs/walkthroughs/end-to-end-auto-quote-test.md`](../walkthroughs/end-to-end-auto-quote-test.md) §"What's NOT in this walkthrough" OQ #3 — closed by this ADR (no topology to stand up; ABERP polls outbound only).
+
+## Addendum — S343: catalogue state dir
+
+The same canonical-state-dir convention this ADR established for the email outbox (`/home/aberp/data/email-outbox/`) governs the material catalogue snapshot:
+
+- The catalogue snapshot lives at `/home/aberp/data/catalogue/materials.json`, overridable via `ABERP_SITE_CATALOGUE_DIR` (absolute paths only).
+- Release directories are immutable per deploy hygiene — the systemd unit runs `ProtectSystem=strict` and only whitelists `/home/aberp/data` (+ the `/mnt/aberp-data` EBS mountpoint it symlinks) under `ReadWritePaths=`. **Application state must live OUTSIDE any release dir.**
+- Before S343, `catalogue-store.ts` defaulted to the process-CWD-relative `./data/catalogue`, which resolved inside the read-only release dir. Every `PUT /api/catalogue/materials` failed with `EROFS: read-only file system` and the `/quote` material dropdown never populated. S343 sets the absolute default, rejects relative overrides, and adds the `F-CAT` boot check (mirroring `F15` for the outbox) so a misconfigured deploy refuses to start with an actionable message instead of silently 500-ing every catalogue push. This is the catalogue analogue of the S311 outbox path-resolution fix.
