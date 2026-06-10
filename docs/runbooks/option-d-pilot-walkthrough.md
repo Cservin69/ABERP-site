@@ -58,10 +58,16 @@ no third party** (`docs/adr/0009-storefront-as-queue-no-tunnel.md`):
 > therefore prefixed with `sudo`. This is expected; you do not need an `aberp` login
 > (the box has no SSH key for `aberp` — GitHub deploys reach it over SSM, not SSH).
 
-> **Versions this was written against:** ABERP `PROD_v2.27.11`, storefront `main` at
-> `9b5611d` (S313). Env-var names, audit-event names, paths, and log strings below are
+> **Versions this was written against:** ABERP `PROD_v2.27.13`, storefront `main` at
+> `c318850` (S323). Env-var names, audit-event names, paths, and log strings below are
 > pinned in code (verified against source), not in this doc — later versions should
 > still match.
+>
+> ⚠️ **Use the NEWEST `PROD_v*` tag — never an older one.** The literal versions in this
+> doc are the floor it was written against. Before running the upgrade, list the tags
+> (`git tag --list 'PROD_v*' | sort -V | tail -1`) and use that. `upgrade_prod.sh` with
+> a tag _older_ than what prod is already on **rolls production backwards** — never do
+> this outside the explicit rollback in [Phase 6](#phase-6--rollback-toggle).
 
 > **Tenant placeholder:** every `prod` below is the ABERP tenant id — the default that
 > `run/upgrade_prod.sh` and `run/run_prod.sh` hard-code (`tenant="prod"`). If your
@@ -71,10 +77,10 @@ no third party** (`docs/adr/0009-storefront-as-queue-no-tunnel.md`):
 
 ## Phase 0 — Pre-flight on the Mac (ABERP side)
 
-Goal: confirm ABERP is on `PROD_v2.27.11`, its keychain secrets are present, and it
+Goal: confirm ABERP is on `PROD_v2.27.13`, its keychain secrets are present, and it
 has booted and written its runtime descriptor. All of Phase 0 is **Mac terminal**.
 
-### 0.1 — Upgrade ABERP to PROD_v2.27.11 and launch it
+### 0.1 — Upgrade ABERP to PROD_v2.27.13 and launch it
 
 First make sure the prod ABERP process is **not** running — the upgrade script
 hard-refuses to swap a running binary (it `pgrep`s for `aberp-ui` / `aberp` and dies
@@ -85,20 +91,28 @@ if either is alive). If you have a `run_prod.sh` terminal open, go to it and pre
 
 ```bash
 cd ~/Documents/Claude/Projects/ABERP
-./run/upgrade_prod.sh PROD_v2.27.11
+./run/upgrade_prod.sh PROD_v2.27.13
 ```
 
-**WHY:** This validates the version string, snapshots the prod DB, does a clean
-`git fetch` + checkout of the `PROD_v2.27.11` branch, verifies the tree is clean, then
-`exec`s `run/run_prod.sh` — so **this same terminal becomes the live ABERP server**.
-Everything downstream (the poll daemon, the keychain reads) depends on this boot.
+**WHY:** This validates the version string, snapshots the prod DB, does a `git fetch` +
+checkout of the `PROD_v2.27.13` branch, then `exec`s `run/run_prod.sh` — so **this same
+terminal becomes the live ABERP server**. Everything downstream (the poll daemon, the
+keychain reads) depends on this boot.
+
+> 🔴 **DESTRUCTIVE — this does NOT "verify and abort" on a dirty tree; it FORCE-cleans.**
+> `upgrade_prod.sh` runs `git reset --hard HEAD`, `git clean -fd`, and
+> `git reset --hard origin/<tag>` against `~/Documents/Claude/Projects/ABERP`. **Any
+> uncommitted or untracked file in that checkout is silently destroyed.** Before you run
+> it, confirm the tree holds nothing you need — run `git status` first; if anything is
+> listed, **stop** and commit or stash it. This is a prod deploy checkout, not a dev
+> scratch dir — it should normally be clean.
 
 **Expected output (tail):**
 
 ```
 [ ok ] no aberp-ui / aberp process running — safe to swap
 ...
-[ ok ] verified: on PROD_v2.27.11, clean tree, HEAD=9b5611d0a1b2 matches origin
+[ ok ] verified: on PROD_v2.27.13, clean tree, HEAD=e88a7f02dc42 matches origin
 ...
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   UPGRADE STATE READY — launching run_prod.sh
@@ -117,7 +131,10 @@ pilot.
 **If it fails:**
 
 - `the prod app is still running … Stop it FIRST` → an old ABERP is alive; `Ctrl-C` its
-  terminal (or `pkill -f run_prod.sh`) and re-run.
+  terminal. If that doesn't clear it, kill the binary the guard actually checks —
+  `pkill -x aberp-ui; pkill -x aberp` (the guard uses `pgrep -x`, and `run_prod.sh`
+  `exec`s _into_ the binary, so `pkill -f run_prod.sh` may match nothing while the
+  binary keeps running) — then re-run.
 - You see `email-outbox poll daemon disabled by env (S307 / PR-276)` instead of
   `spawned` → a kill switch from a prior rollback is still set; go to
   [Phase 6](#phase-6--rollback-toggle) to unset it, then relaunch.
@@ -165,11 +182,15 @@ way before going live.
 > `quote_intake_token`). One token, one keychain entry —
 > [Phase 2](#phase-2--bearer-token-reconciliation) reconciles it against the storefront.
 
-To print the actual value (you'll need it in Phase 2):
+To confirm the entry **exists without printing the secret** to your scrollback (this is
+often a screen-shared session — never dump the live bearer):
 
 ```bash
-security find-generic-password -s "aberp.quote_intake.prod" -a "quote_intake_token" -w
+security find-generic-password -s "aberp.quote_intake.prod" -a "quote_intake_token" -w >/dev/null && echo "(set)" || echo "(missing)"
 ```
+
+Phase 2 reconciles the actual value using a SHA-256 **fingerprint**, never the token
+itself.
 
 ### 0.3 — Verify the runtime descriptor exists
 
@@ -205,6 +226,21 @@ snapshot failure).
 > `relay_token_keychain_service` points at the **deprecated** push-relay token
 > (ADR-0007, superseded). It is _not_ the bearer this pilot uses — ignore it. The pilot
 > bearer is the `quote_intake_token` from 0.2.
+
+### Phase 0 safety checklist
+
+Before leaving Phase 0, confirm every box — these guard against the operator-facing
+hazards this runbook was audited for (S329):
+
+- [ ] No instructions ask the operator to **downgrade** (the `upgrade_prod.sh` tag is the
+      newest `PROD_v*`, never older than what prod is already on).
+- [ ] No `git reset --hard` / `git clean -fd` is run **outside** the explicit rollback in
+      [Phase 6](#phase-6--rollback-toggle); `git status` was checked clean before the
+      upgrade.
+- [ ] No bearer / secret was displayed in terminal output (presence checks and SHA-256
+      fingerprints only — never the raw token).
+- [ ] All file paths referenced above were verified to exist before the operator ran the
+      command that uses them.
 
 ---
 
@@ -314,7 +350,7 @@ commit SHA**, so the resolved path tells you exactly what's live.
      Loaded: loaded (/etc/systemd/system/aberp-site.service; enabled; ...)
      Active: active (running) since ...
 ...
-/home/aberp/releases/9b5611d.../          <- release dir named by deployed commit SHA
+/home/aberp/releases/c318850.../          <- release dir named by deployed commit SHA
 ```
 
 The `releases/<sha>` directory should start with the SHA of the commit you just
@@ -450,13 +486,14 @@ audit row you'll read in [Phase 5.3](#53--401-unauthorized-bearer-mismatch).
 **Command:** _(Mac terminal)_
 
 ```bash
-security find-generic-password -s "aberp.quote_intake.prod" -a "quote_intake_token" -w
+security find-generic-password -s "aberp.quote_intake.prod" -a "quote_intake_token" -w | tr -d '\n' | shasum -a 256
 ```
 
-**WHY:** This is the literal bearer the daemon sends as `Authorization: Bearer <…>`.
-Call it `TOKEN_ABERP`.
+**WHY:** This is the bearer the daemon sends as `Authorization: Bearer <…>`, but printed
+as its **SHA-256 fingerprint** — never the raw secret (safe on a screen-shared session).
+Call the fingerprint `FP_ABERP`. Two tokens match iff their fingerprints match.
 
-**Expected output:** one line — the token string (no `OK:`, just the value).
+**Expected output:** one line — a 64-hex-char fingerprint followed by `  -`.
 
 **If it fails:** `SecKeychainSearchCopyNext: The specified item could not be found` →
 the entry is absent; create it in 2.3.
@@ -466,30 +503,31 @@ the entry is absent; create it in 2.3.
 **Command:** _(Lightsail SSH, as `ubuntu`)_
 
 ```bash
-sudo grep '^ABERP_SITE_ADMIN_TOKEN=' /etc/aberp-site.env
+sudo sed -n 's/^ABERP_SITE_ADMIN_TOKEN=//p' /etc/aberp-site.env | tr -d '\n' | shasum -a 256
 ```
 
-**WHY:** `/etc/aberp-site.env` is root-readable only; `sudo` is required. The value after
-`=` is what the storefront compares every bearer against (`src/lib/server/auth.ts`). Call
-it `TOKEN_STOREFRONT`.
+**WHY:** `/etc/aberp-site.env` is root-readable only; `sudo` is required. This prints the
+**SHA-256 fingerprint** of the value the storefront compares every bearer against
+(`src/lib/server/auth.ts`) — never the raw token. Call the fingerprint `FP_STOREFRONT`.
 
-**Expected output:**
+**Expected output:** one line — a 64-hex-char fingerprint followed by `  -`.
 
-```
-ABERP_SITE_ADMIN_TOKEN=<some-long-token>
-```
-
-**If it fails:** empty output → the var isn't set; the storefront would 503 (not 401) on
-`/api/internal/*`. Set it via the "brand-new token" path below.
+**If it fails:** the fingerprint of an empty string (`e3b0c442…`) → the var isn't set; the
+storefront would 503 (not 401) on `/api/internal/*`. Set it via the "brand-new token"
+path below.
 
 ### 2.3 — Make them match
 
-Compare `TOKEN_ABERP` and `TOKEN_STOREFRONT`. **If they're identical, you're done —
-skip to Phase 3.**
+Compare `FP_ABERP` and `FP_STOREFRONT`. **If the fingerprints are identical, the tokens
+match byte-for-byte — you're done, skip to Phase 3.**
 
 If they differ (or either is missing), take the **storefront's** value as source of
-truth and write it into the Mac keychain. Cleanest path is via the ABERP SPA, which
-writes the keychain entry **and** hot-reloads the daemon with no restart:
+truth and write it into the Mac keychain. `TOKEN_STOREFRONT` below is that raw value —
+read it **only when you actually need to copy it**, and only on the Lightsail box (where
+`/etc/aberp-site.env` is already root-only), not by re-printing it on a screen-shared Mac:
+`sudo sed -n 's/^ABERP_SITE_ADMIN_TOKEN=//p' /etc/aberp-site.env`. Cleanest path to write
+it is via the ABERP SPA, which writes the keychain entry **and** hot-reloads the daemon
+with no restart:
 
 **WHERE: ABERP SPA → Settings → Quote Intake.**
 
@@ -838,7 +876,9 @@ the queue. Queued entries simply wait — nothing is lost.
    ```
 
    (If you instead see `email-outbox poll daemon spawned (S307 / PR-276)`, the var
-   didn't take — check for a typo or a leftover `export` in `~/.aberp/prod/env.sh`.)
+   didn't take — check for a typo. Note the env var lives **only for this single
+   `run_prod.sh` invocation**; ABERP does not persist it to any file, so relaunching
+   from a fresh terminal **without** the prefix re-enables the daemon.)
 
 With the daemon disabled, `queued/` on Lightsail grows but nothing sends. Customers can
 still submit; the acknowledgments wait safely in the queue.

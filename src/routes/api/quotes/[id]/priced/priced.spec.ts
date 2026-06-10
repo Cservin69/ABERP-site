@@ -671,11 +671,12 @@ describe('POST /api/quotes/{id}/priced — S323 stock-alert re-render', () => {
 		expect((after.status_history as unknown[]).length).toBe(histBefore);
 	});
 
-	it('s323_priced_post_acceptance_still_409', async () => {
+	it('s323_priced_post_acceptance_non_stock_alert_still_409', async () => {
 		const { POST } = await loadHandler();
-		// `approved` is the post-acceptance status (q/[id]/accept sets it) and is
-		// terminal. Seed it with a prior priced record + an on-disk PDF so we can
-		// prove the re-render attempt mutates nothing after the customer commits.
+		// `approved` is the post-acceptance status. A NON-stock-alert post
+		// (stock_alert:false) must still be a hard 409 — the S329 relax is
+		// scoped to the stock-status overlay only, not a free overwrite of an
+		// accepted quote.
 		seedQuote(QUOTE_ID, 'approved', {
 			pricing: {
 				received_at: '2026-06-06T11:00:00Z',
@@ -691,9 +692,9 @@ describe('POST /api/quotes/{id}/priced — S323 stock-alert re-render', () => {
 		});
 		writeFileSync(join(TMP_ROOT, QUOTE_ID, 'priced.pdf'), SMALL_PDF);
 
-		const rerender = pricedReq(QUOTE_ID, buildForm(defaultMeta({ stock_alert: true }), BANNER_PDF));
+		const post = pricedReq(QUOTE_ID, buildForm(defaultMeta({ stock_alert: false }), BANNER_PDF));
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
-		const res = await POST({ params: { id: QUOTE_ID }, request: rerender } as any);
+		const res = await POST({ params: { id: QUOTE_ID }, request: post } as any);
 		expect(res.status).toBe(409);
 		const body = (await res.json()) as { error: string };
 		expect(body.error).toBe('terminal_or_committed');
@@ -702,5 +703,110 @@ describe('POST /api/quotes/{id}/priced — S323 stock-alert re-render', () => {
 		expect(readFileSync(join(TMP_ROOT, QUOTE_ID, 'priced.pdf')).length).toBe(SMALL_PDF.length);
 		const after = readSeededQuote(QUOTE_ID);
 		expect((after.pricing as { stock_alert: boolean }).stock_alert).toBe(false);
+	});
+});
+
+// S329 / 🔴2 — post-acceptance stock-alert re-render. The customer-banner
+// trigger fires AFTER acceptance (status `approved`), which the S323 relax
+// (scoped to `quoted`) could never reach. Accept the same-hash,
+// stock_alert:true re-post against an `approved` quote so the already-
+// accepted customer still sees the downgrade — while a different hash, an
+// already-flipped flag, and non-stock-alert posts keep their guards.
+describe('POST /api/quotes/{id}/priced — S329 post-acceptance stock-alert re-render', () => {
+	const BANNER_PDF = Buffer.from('%PDF-1.4\n% s329 post-accept banner pdf\n', 'utf8');
+
+	function approvedPrior(stockAlert: boolean): Record<string, unknown> {
+		return {
+			received_at: '2026-06-06T11:00:00Z',
+			valid_until: FUTURE_DATE,
+			breakdown_json: { total_eur: 123.45, currency: 'EUR' },
+			pdf_stored_at: 'priced.pdf',
+			feature_graph_hash: 'blake3:1a2b3c4d5e6f',
+			extractor_version: 'aberp-cad-extract@0.4.1',
+			engine_version: 'aberp-quote-engine@0.7.0',
+			stock_alert: stockAlert
+		};
+	}
+
+	it('s329_priced_post_accept_stock_alert_flip_allowed', async () => {
+		const { POST } = await loadHandler();
+		seedQuote(QUOTE_ID, 'approved', {
+			pricing: approvedPrior(false),
+			accepted_at: '2026-06-07T09:00:00Z'
+		});
+		writeFileSync(join(TMP_ROOT, QUOTE_ID, 'priced.pdf'), SMALL_PDF);
+		const histBefore =
+			(readSeededQuote(QUOTE_ID).status_history as unknown[] | undefined)?.length ?? 0;
+
+		// Same hash, stock_alert:true, fresh banner PDF.
+		const rerender = pricedReq(QUOTE_ID, buildForm(defaultMeta({ stock_alert: true }), BANNER_PDF));
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
+		const res = await POST({ params: { id: QUOTE_ID }, request: rerender } as any);
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { status: string; rerendered?: boolean };
+		expect(body.status).toBe('approved');
+		expect(body.rerendered).toBe(true);
+
+		// PDF overwritten with the banner bytes; status stays approved; flag flipped.
+		const onDisk = readFileSync(join(TMP_ROOT, QUOTE_ID, 'priced.pdf'));
+		expect(onDisk.equals(BANNER_PDF)).toBe(true);
+		const after = readSeededQuote(QUOTE_ID);
+		expect(after.status).toBe('approved');
+		const pricing = after.pricing as Record<string, unknown>;
+		expect(pricing.stock_alert).toBe(true);
+		expect(pricing.feature_graph_hash).toBe('blake3:1a2b3c4d5e6f');
+		const hist = after.status_history as { from: string; to: string; notes: string }[];
+		expect(hist.length).toBe(histBefore + 1);
+		expect(hist[hist.length - 1].from).toBe('approved');
+		expect(hist[hist.length - 1].to).toBe('approved');
+		expect(hist[hist.length - 1].notes).toContain('Stock-alert re-render');
+	});
+
+	it('s329_priced_post_accept_already_true_returns_noop', async () => {
+		const { POST } = await loadHandler();
+		seedQuote(QUOTE_ID, 'approved', {
+			pricing: approvedPrior(true),
+			accepted_at: '2026-06-07T09:00:00Z'
+		});
+		writeFileSync(join(TMP_ROOT, QUOTE_ID, 'priced.pdf'), SMALL_PDF);
+
+		const second = pricedReq(QUOTE_ID, buildForm(defaultMeta({ stock_alert: true }), BANNER_PDF));
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
+		const res = await POST({ params: { id: QUOTE_ID }, request: second } as any);
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as {
+			status: string;
+			idempotent?: boolean;
+			rerendered?: boolean;
+		};
+		expect(body.idempotent).toBe(true);
+		expect(body.rerendered).toBeUndefined();
+		// PDF untouched (sticky).
+		expect(readFileSync(join(TMP_ROOT, QUOTE_ID, 'priced.pdf')).length).toBe(SMALL_PDF.length);
+	});
+
+	it('s329_priced_post_accept_different_hash_409', async () => {
+		const { POST } = await loadHandler();
+		seedQuote(QUOTE_ID, 'approved', {
+			pricing: approvedPrior(false),
+			accepted_at: '2026-06-07T09:00:00Z'
+		});
+		writeFileSync(join(TMP_ROOT, QUOTE_ID, 'priced.pdf'), SMALL_PDF);
+
+		const post = pricedReq(
+			QUOTE_ID,
+			buildForm(
+				defaultMeta({ stock_alert: true, feature_graph_hash: 'blake3:deadbeef' }),
+				BANNER_PDF
+			)
+		);
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
+		const res = await POST({ params: { id: QUOTE_ID }, request: post } as any);
+		expect(res.status).toBe(409);
+		const body = (await res.json()) as { error: string };
+		expect(body.error).toBe('already_priced_with_different_hash');
+		// Untouched.
+		expect(readFileSync(join(TMP_ROOT, QUOTE_ID, 'priced.pdf')).length).toBe(SMALL_PDF.length);
+		expect((readSeededQuote(QUOTE_ID).pricing as { stock_alert: boolean }).stock_alert).toBe(false);
 	});
 });

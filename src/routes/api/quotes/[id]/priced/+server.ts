@@ -37,6 +37,69 @@ interface MetaPayload {
 
 type MetaVerdict = { ok: true; value: MetaPayload } | { ok: false; reason: string };
 
+/// S329 / 🔴2 — overwrite the priced PDF + flip `stock_alert` true on a
+/// same-hash re-post. Shared by the pre-acceptance (`quoted`) relax (S323)
+/// and the post-acceptance (`approved`) relax (S329). `statusLabel` is the
+/// quote's current status — preserved across the re-render (the overlay
+/// never changes terminality). Caller has already verified same-hash +
+/// `meta.stock_alert` + `prior.stock_alert !== true`.
+async function applyStockAlertRerender(
+	id: string,
+	existing: QuoteMetadata,
+	prior: QuotePricing,
+	meta: MetaPayload,
+	pdfBlob: Blob,
+	statusLabel: string
+): Promise<Response> {
+	const rerenderBytes = new Uint8Array(await pdfBlob.arrayBuffer());
+	await writePricedPdfAtomic(id, rerenderBytes);
+
+	const rerenderAt = new Date().toISOString();
+	const rerenderPricing: QuotePricing = {
+		// Preserve the original priced identity (received_at, hash). Only the
+		// stock-status overlay and the artifact it lives on are refreshed; the
+		// freshly-validated meta fields are taken from the re-post so the
+		// stored record stays coherent with the re-rendered PDF.
+		...prior,
+		valid_until: meta.valid_until,
+		breakdown_json: meta.breakdown_json,
+		extractor_version: meta.extractor_version,
+		engine_version: meta.engine_version,
+		stock_alert: true
+	};
+	const rerendered: QuoteMetadata = {
+		...existing,
+		pricing: rerenderPricing,
+		status_history: [
+			...(existing.status_history ?? []),
+			{
+				at: rerenderAt,
+				from: statusLabel,
+				to: statusLabel,
+				notes: `Stock-alert re-render: priced.pdf overwritten, stock_alert flipped true by ${meta.engine_version}`
+			}
+		]
+	};
+	await writeQuoteAtomic(id, rerendered);
+
+	// Audit trace for the re-render. The customer HTML banner (/q/[id]) and
+	// the re-rendered PDF both now reflect stock_alert:true; this is the only
+	// server-side record that the false→true overwrite happened on a
+	// same-hash post, so future investigation has a trail.
+	console.info(
+		'[priced] quote.priced_pdf_rerendered',
+		JSON.stringify({
+			event: 'quote.priced_pdf_rerendered',
+			id,
+			feature_graph_hash: meta.feature_graph_hash,
+			status: statusLabel,
+			stock_alert: true
+		})
+	);
+
+	return json({ status: statusLabel, rerendered: true });
+}
+
 function validateMeta(raw: unknown): MetaVerdict {
 	if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
 		return { ok: false, reason: 'meta must be a JSON object' };
@@ -182,12 +245,46 @@ export const POST: RequestHandler = async ({ params, request }) => {
 
 	const meta = verdict.value;
 
-	// State-machine check. Per ADR-0004 (+ S323 stock-alert re-render relaxation):
+	// State-machine check. Per ADR-0004 (+ S323/S329 stock-alert re-render relaxation):
 	//   received | quoting              → proceed (new priced write)
 	//   quoted, same hash, no flip      → 200 no-op (idempotent ABERP retry)
 	//   quoted, same hash, false→true   → overwrite PDF + flip stock_alert (S323)
 	//   quoted, new hash                → 409 already_priced_with_different_hash
-	//   terminal (incl. accepted/approved) → 409 terminal_or_committed
+	//   approved, same hash, false→true → overwrite PDF + flip stock_alert (S329 🔴2)
+	//   approved, same hash, already true → 200 no-op (already flipped)
+	//   approved, new hash / non-stock-alert post → 409
+	//   rejected | invoiced            → 409 terminal_or_committed
+	//
+	// S329 / 🔴2 — `approved` is terminal for pricing identity but NOT for
+	// the stock-status overlay. The trigger that arms the customer banner
+	// fires AFTER the customer accepts (status `approved`); the re-render
+	// daemon then re-posts the SAME geometry/pricing hash with
+	// stock_alert:true. The S325 daemon could never deliver because the
+	// only relax window was `quoted` (pre-acceptance) — mutually exclusive
+	// with the post-acceptance trigger. Accept the same-hash, stock_alert
+	// re-post here so the already-accepted customer still sees the downgrade.
+	if (existing.status === 'approved' && meta.stock_alert) {
+		const prior = existing.pricing;
+		// No prior pricing on an approved quote is anomalous — nothing to
+		// overwrite; keep the terminal 409 contract.
+		if (!prior) {
+			return json({ error: 'terminal_or_committed', status: existing.status }, { status: 409 });
+		}
+		if (prior.feature_graph_hash !== meta.feature_graph_hash) {
+			return json(
+				{
+					error: 'already_priced_with_different_hash',
+					feature_graph_hash: prior.feature_graph_hash ?? null
+				},
+				{ status: 409 }
+			);
+		}
+		if (prior.stock_alert === true) {
+			// Already flipped — idempotent (sticky, like the ABERP recompute).
+			return json({ status: 'approved', idempotent: true });
+		}
+		return await applyStockAlertRerender(id, existing, prior, meta, pdfBlob, 'approved');
+	}
 	if (TERMINAL_STATES.has(existing.status)) {
 		return json({ error: 'terminal_or_committed', status: existing.status }, { status: 409 });
 	}
@@ -217,52 +314,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
 			return json({ status: 'quoted', idempotent: true });
 		}
 
-		const rerenderBytes = new Uint8Array(await pdfBlob.arrayBuffer());
-		await writePricedPdfAtomic(id, rerenderBytes);
-
-		const rerenderAt = new Date().toISOString();
-		const rerenderPricing: QuotePricing = {
-			// Preserve the original priced identity (received_at, hash). Only the
-			// stock-status overlay and the artifact it lives on are refreshed; the
-			// freshly-validated meta fields are taken from the re-post so the
-			// stored record stays coherent with the re-rendered PDF.
-			...prior,
-			valid_until: meta.valid_until,
-			breakdown_json: meta.breakdown_json,
-			extractor_version: meta.extractor_version,
-			engine_version: meta.engine_version,
-			stock_alert: true
-		};
-		const rerendered: QuoteMetadata = {
-			...existing,
-			pricing: rerenderPricing,
-			status_history: [
-				...(existing.status_history ?? []),
-				{
-					at: rerenderAt,
-					from: 'quoted',
-					to: 'quoted',
-					notes: `Stock-alert re-render: priced.pdf overwritten, stock_alert flipped true by ${meta.engine_version}`
-				}
-			]
-		};
-		await writeQuoteAtomic(id, rerendered);
-
-		// Audit trace for the re-render (S323). The customer HTML banner
-		// (/q/[id]) and the re-rendered PDF both now reflect stock_alert:true;
-		// this is the only server-side record that the false→true overwrite
-		// happened on a same-hash post, so future investigation has a trail.
-		console.info(
-			'[priced] quote.priced_pdf_rerendered',
-			JSON.stringify({
-				event: 'quote.priced_pdf_rerendered',
-				id,
-				feature_graph_hash: meta.feature_graph_hash,
-				stock_alert: true
-			})
-		);
-
-		return json({ status: 'quoted', rerendered: true });
+		return await applyStockAlertRerender(id, existing, prior, meta, pdfBlob, 'quoted');
 	}
 	if (existing.status !== 'received' && existing.status !== 'quoting') {
 		return json({ error: 'unexpected source state', status: existing.status }, { status: 409 });
