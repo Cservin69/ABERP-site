@@ -1,5 +1,13 @@
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import {
+	mkdtempSync,
+	mkdirSync,
+	rmSync,
+	writeFileSync,
+	readFileSync,
+	readdirSync,
+	existsSync
+} from 'node:fs';
 import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -9,6 +17,20 @@ const TMP_ROOT = mkdtempSync(resolve(tmpdir(), 'aberp-accept-'));
 // quote-store reads ABERP_SITE_QUOTE_DIR at module load via process.env —
 // must be set before any import drags quote-store in. (S277 / PR-02 trap.)
 process.env.ABERP_SITE_QUOTE_DIR = TMP_ROOT;
+
+// email-outbox.ts reads ABERP_SITE_EMAIL_OUTBOX_DIR into a top-level const at
+// module load (email-outbox.ts:56). The accept POST path enqueues the
+// accept-confirmation email through it, so without this injection the enqueue
+// targets the production default `/home/aberp/data/email-outbox` — which EACCES
+// on the GitHub-hosted runner (the `ubuntu` user can't mkdir under /home/aberp).
+// `enqueueSafe` swallows that error so the assertions still pass, but the failed
+// I/O against the unreachable production path is what left vitest's process
+// alive past test completion and produced the 2-core-runner exit-hang that
+// S313/S315/S317 chased. Pointing the outbox at a tmpdir BEFORE first import —
+// the same module-level pattern email-outbox.spec.ts and the other outbox specs
+// use — closes the root cause. (S331 / PR-19.)
+const OUTBOX_ROOT = mkdtempSync(resolve(tmpdir(), 'aberp-accept-outbox-'));
+process.env.ABERP_SITE_EMAIL_OUTBOX_DIR = OUTBOX_ROOT;
 
 const { envState } = vi.hoisted(() => ({
 	envState: {
@@ -27,6 +49,11 @@ vi.mock('$env/dynamic/private', () => ({
 afterAll(() => {
 	try {
 		rmSync(TMP_ROOT, { recursive: true, force: true });
+	} catch {
+		/* ignore */
+	}
+	try {
+		rmSync(OUTBOX_ROOT, { recursive: true, force: true });
 	} catch {
 		/* ignore */
 	}
@@ -405,5 +432,42 @@ describe('POST /q/{id}/accept — accept action', () => {
 		expect(after.acceptance_audit_id).toBeUndefined();
 		// acceptance_signature_ts remains the binding proof.
 		expect(after.acceptance_signature_ts).toBe(ts);
+	});
+
+	// S331 / PR-19 — regression guard for the vitest CI exit-hang root cause.
+	// Before this spec injected ABERP_SITE_EMAIL_OUTBOX_DIR, the accept POST path
+	// enqueued the confirmation email to the production default
+	// `/home/aberp/data/email-outbox`, which EACCES'd on the 2-core GitHub runner
+	// and left a handle that kept vitest alive past test completion (the hang that
+	// S313/S315/S317 chased and S317 papered over with a de-gate). This test
+	// proves the enqueue now lands in the injected tmpdir, not the production
+	// path — i.e. the outbox write never escapes the test sandbox.
+	it('s331_accept_does_not_leak_email_outbox_to_home_aberp', async () => {
+		// 1. Injection is in effect: the outbox points at our tmpdir, never the
+		//    production default. (`/home/aberp` is the runner-unreachable path.)
+		expect(process.env.ABERP_SITE_EMAIL_OUTBOX_DIR).toBe(OUTBOX_ROOT);
+		expect(OUTBOX_ROOT.startsWith('/home/aberp')).toBe(false);
+
+		// 2. Drive the full accept POST with the operator inbox configured so the
+		//    confirmation email is actually enqueued (otherwise readConfig skips).
+		seedQuote(QUOTE_ID, 'quoted', { pricing: pricingFor() });
+		envState.ABERP_SITE_OPERATOR_EMAIL = 'ops@abenerp.com';
+		const { actions } = await loadModule();
+		const { ts, sig } = await freshSig(QUOTE_ID);
+		const ev = actionEvent(QUOTE_ID, ts, sig, { accept_token: 'ACCEPT' });
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
+		const res = await (actions.default as (e: any) => Promise<any>)(ev);
+		expect((res as { accepted: boolean }).accepted).toBe(true);
+
+		// 3. The enqueue landed a queued entry inside the tmp outbox — proving the
+		//    write went to the sandbox, not the production path that hangs CI.
+		const queued = readdirSync(join(OUTBOX_ROOT, 'queued'));
+		expect(queued.some((f) => f.endsWith('.json'))).toBe(true);
+
+		// 4. The production default outbox dir was NOT created by this run. On the
+		//    CI runner /home/aberp/data is unwritable so it can never appear; this
+		//    asserts we didn't accidentally fall back to it. (Harmless on macOS,
+		//    where /home/aberp typically doesn't exist either.)
+		expect(existsSync('/home/aberp/data/email-outbox/queued')).toBe(false);
 	});
 });

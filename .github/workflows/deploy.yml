@@ -12,11 +12,14 @@ name: Deploy to AWS
 #   ABERP_SITE_LS_INSTANCE  Lightsail instance ID registered with SSM (mi-... or i-...)
 # See docs/aws/operator-checklist.md for the full provisioning recipe.
 #
-# NOTE: 2026-06-09 — Test step temporarily de-gated from build pipeline.
-# Vitest CI exit-hang (pool-independent, surfaces only on 2-core runners) is under
-# investigation in a follow-up code session. Local `npm run test:unit -- --run`
-# passes consistently (351/351 in ~2s). CI test job runs separately and reports
-# status without blocking deploy. Re-gate once the real exit-handle leak is found.
+# NOTE: 2026-06-10 — Test step is RE-GATED inline in the `build` job (S331 / PR-19).
+# The vitest CI exit-hang that S313/S315 chased and S317 (f5ede8f) papered over
+# with a non-gating `test` job is now root-caused and fixed: accept.spec.ts was
+# enqueueing the accept-confirmation email to the production default
+# `/home/aberp/data/email-outbox`, which EACCES'd on the 2-core runner and left a
+# handle that kept the process alive past test completion. accept.spec.ts now
+# injects ABERP_SITE_EMAIL_OUTBOX_DIR=<tmpdir> before import, matching the other
+# outbox specs. A green test is once again required before deploy.
 # See: project_aberp_site_ci_test_unit_hang.md memory.
 
 on:
@@ -35,27 +38,6 @@ env:
   LIGHTSAIL_INSTANCE: ${{ vars.ABERP_SITE_LS_INSTANCE }}
 
 jobs:
-  # S317 / PR-17: Test runs in its own non-gating job. `continue-on-error: true`
-  # means a failure (or the known vitest CI exit-hang) reports RED on the job but
-  # does NOT fail the workflow, so build → deploy-static → deploy-dynamic proceed.
-  # There is intentionally NO `needs:` relationship between build and test — they
-  # run in parallel. This is a TEMPORARY de-gate (see top-of-file note); re-fold
-  # the Test step back into `build` once the exit-handle leak is found and fixed.
-  test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-      - run: npm ci
-      - name: Test
-        run: npm run test:unit -- --run
-        timeout-minutes: 5
-
   build:
     runs-on: ubuntu-latest
     # S313 / PR-14: cap the whole build job. Before this, the job had no
@@ -72,10 +54,14 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm run lint
-      # S317 / PR-17: the Test step moved to its own non-gating `test` job above
-      # (see top-of-file note). The vite.config.ts `pool: 'threads'` fix from
-      # S315 / PR-15 stays in place; this de-gate is only about not blocking the
-      # pilot deploy on the CI exit-hang while it is investigated.
+      # S331 / PR-19: Test re-gated inline (reverting the S317 / f5ede8f de-gate).
+      # The exit-hang root cause is closed in accept.spec.ts (see top-of-file
+      # note), so a failure here once again blocks build → deploy. The 5-min step
+      # cap + 15-min job cap (S313) stay as defense-in-depth: a healthy run is ~2s,
+      # so any regression to a hang trips the cap fast instead of burning the job.
+      - name: Test
+        run: npm run test:unit -- --run
+        timeout-minutes: 5
       - run: npm run build
       - name: Sanity-check build output
         run: |
