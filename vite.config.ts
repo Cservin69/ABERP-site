@@ -1,16 +1,27 @@
 import { defineConfig } from 'vitest/config';
 import { sveltekit } from '@sveltejs/kit/vite';
 
+// S333 / PR-20: opt-in instrumentation for the CI exit-hang. Loaded ONLY when
+// VITEST_HANG_DIAG=1 (set on the deploy.yml Test step) so normal dev/CI runs
+// don't even parse the diagnostic files. See tests/hang-diag.ts.
+const hangDiag = process.env.VITEST_HANG_DIAG === '1';
+
 export default defineConfig({
 	plugins: [sveltekit()],
 	test: {
 		expect: { requireAssertions: true },
+		// globalSetup runs in the main vitest process — instruments the process
+		// GitHub kills on hang.
+		globalSetup: hangDiag ? ['./tests/global-hang-diag.ts'] : [],
 		projects: [
 			{
 				extends: './vite.config.ts',
 				test: {
 					name: 'server',
 					environment: 'node',
+					// setupFiles run inside each worker — instruments the other
+					// hang-location hypothesis (a worker, not main, holding a handle).
+					setupFiles: hangDiag ? ['./tests/setup-hang-diag.ts'] : [],
 					// S315 / PR-15: run in the worker-threads pool, not the default
 					// `forks` pool. The CI Test step hung indefinitely *after* all
 					// 351 tests passed — the run logged every file as ✓, then never

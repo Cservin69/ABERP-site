@@ -55,13 +55,22 @@ jobs:
       - run: npm run check
       - run: npm run lint
       # S331 / PR-19: Test re-gated inline (reverting the S317 / f5ede8f de-gate).
-      # The exit-hang root cause is closed in accept.spec.ts (see top-of-file
-      # note), so a failure here once again blocks build → deploy. The 5-min step
-      # cap + 15-min job cap (S313) stay as defense-in-depth: a healthy run is ~2s,
-      # so any regression to a hang trips the cap fast instead of burning the job.
+      # A failure here blocks build → deploy. The 5-min step cap + 15-min job cap
+      # (S313) stay as defense-in-depth: a healthy run is ~2s, so any regression
+      # to a hang trips the cap fast instead of burning the job.
+      #
+      # S333 / PR-20: VITEST_HANG_DIAG=1 arms tests/hang-diag.ts — an unref'd
+      # interval that dumps active-resource types + why-is-node-running handle
+      # stacks if (and only if) the process is still alive 8s/20s/60s after the
+      # tests finish. The exit-hang chased since S313 reproduces ONLY here on the
+      # 2-core runner, so this is how we get ground-truth on the leaked handle.
+      # The env var is a no-op in normal dev runs (the config doesn't load the
+      # diag files without it). Leave it on as a permanent guardrail.
       - name: Test
         run: npm run test:unit -- --run
         timeout-minutes: 5
+        env:
+          VITEST_HANG_DIAG: '1'
       - run: npm run build
       - name: Sanity-check build output
         run: |
