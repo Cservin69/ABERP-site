@@ -6,7 +6,7 @@ import {
 	type OutboxDirProbeResult
 } from './boot-checks';
 import { EXPECTED_BODY_SIZE_LIMIT } from './body-size-limit';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -162,14 +162,26 @@ describe('probeOutboxDirSync', () => {
 		if (!r.ok) expect(r.reason).toContain('not absolute');
 	});
 
-	it('red on a non-existent path under a non-writable parent (mkdir failure surface)', () => {
-		// Use a path under /proc/1 which root-owns and is not writable as a
-		// regular user. If the runner happens to be root, the probe will
-		// succeed and we skip the assertion (no platform-portable way to
-		// guarantee unwritability across all CI envs).
-		const r = probeOutboxDirSync('/proc/1/email-outbox-probe-x');
-		if (!r.ok) {
-			expect(r.reason.length).toBeGreaterThan(0);
+	it('red when the parent path is a regular file (mkdir failure surface)', () => {
+		// S333 / PR-20: this used to probe `/proc/1/email-outbox-probe-x` to get
+		// an unwritable parent. On the 2-core GitHub Linux runner that procfs
+		// path wedged the worker thread inside the synchronous mkdir/access
+		// syscall — the boot-checks worker never reported, vitest's pool waited
+		// on it forever, and the whole `npm run test:unit` process hung at exit
+		// until the 5-min CI cap (root-caused via why-is-node-running, see
+		// project_aberp_site_ci_test_unit_hang memory). Probing a path *under a
+		// regular file* reproduces the mkdir-failure branch deterministically and
+		// portably (ENOTDIR on Linux + macOS), touching only a tmpdir we own — no
+		// procfs, no permission/root guesswork, and the assertion always fires.
+		const base = mkdtempSync(join(tmpdir(), 'outbox-probe-notdir-'));
+		const file = join(base, 'a-file');
+		writeFileSync(file, 'not a directory', 'utf8');
+		try {
+			const r = probeOutboxDirSync(join(file, 'child'));
+			expect(r.ok).toBe(false);
+			if (!r.ok) expect(r.reason).toContain('mkdir failed');
+		} finally {
+			rmSync(base, { recursive: true, force: true });
 		}
 	});
 });
