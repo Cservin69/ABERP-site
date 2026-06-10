@@ -53,22 +53,40 @@ describe('validateMaterialRow', () => {
 		if (!v.ok) expect(v.reason).toMatch(/grade/);
 	});
 
-	it('rejects lower-case grade', async () => {
+	// S338 — real-world material grades are the push source (ABERP's
+	// `quoting_materials.grade` PK). The pre-S338 regex rejected digit-first,
+	// hyphenated, spaced and lowercase grades, which 400'd the entire push and
+	// left `/quote` on the generic fallback. These now ACCEPT the shapes real
+	// grades take.
+	it('s338: accepts real-world ABERP seed grades', async () => {
 		const { validateMaterialRow } = await loadStore();
-		const v = validateMaterialRow({ ...goodRow(), grade: 'al_6061_t6' }, 0);
+		for (const grade of [
+			'6061-T6',
+			'7075-T651',
+			'304',
+			'316',
+			'Ti-6Al-4V',
+			'Inconel 718',
+			'17-4PH',
+			'PEEK'
+		]) {
+			const v = validateMaterialRow({ ...goodRow(), grade }, 0);
+			expect(v.ok, `grade ${grade} must be accepted`).toBe(true);
+		}
+	});
+
+	it('s338: still rejects a grade with a leading separator', async () => {
+		const { validateMaterialRow } = await loadStore();
+		const v = validateMaterialRow({ ...goodRow(), grade: '-6061' }, 0);
 		expect(v.ok).toBe(false);
 	});
 
-	it('rejects grade starting with digit', async () => {
+	it('s338: still rejects control-char / injection chars in grade', async () => {
 		const { validateMaterialRow } = await loadStore();
-		const v = validateMaterialRow({ ...goodRow(), grade: '6061_T6' }, 0);
-		expect(v.ok).toBe(false);
-	});
-
-	it('rejects grade with spaces', async () => {
-		const { validateMaterialRow } = await loadStore();
-		const v = validateMaterialRow({ ...goodRow(), grade: 'AL 6061' }, 0);
-		expect(v.ok).toBe(false);
+		for (const grade of ['AL\r\n6061', 'AL\x006061', 'AL<script>', 'AL;DROP']) {
+			const v = validateMaterialRow({ ...goodRow(), grade }, 0);
+			expect(v.ok, `grade ${JSON.stringify(grade)} must be rejected`).toBe(false);
+		}
 	});
 
 	it('rejects grade > 64 chars', async () => {
@@ -155,7 +173,7 @@ describe('validateSnapshotBody', () => {
 	it('one bad row rejects the entire snapshot with a row index in the reason', async () => {
 		const { validateSnapshotBody } = await loadStore();
 		const v = validateSnapshotBody({
-			materials: [goodRow(), { ...goodRow(), grade: 'TI_6AL_4V' }, { ...goodRow(), grade: 'oops' }]
+			materials: [goodRow(), { ...goodRow(), grade: 'TI_6AL_4V' }, { ...goodRow(), grade: 'oops!' }]
 		});
 		expect(v.ok).toBe(false);
 		if (!v.ok) expect(v.reason).toMatch(/materials\[2\]/);

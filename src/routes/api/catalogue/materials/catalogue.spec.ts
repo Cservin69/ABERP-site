@@ -232,3 +232,55 @@ describe('GET /api/catalogue/materials', () => {
 		expect(res.status).toBe(200);
 	});
 });
+
+// S338 — the live `/quote` fallback defect. ABERP pushes its real seed
+// grades ("6061-T6", "304", "Ti-6Al-4V", "Inconel 718", …); pre-S338 the
+// receiver 400'd them and the snapshot never landed, so the dropdown stayed
+// on the generic Aluminum/Steel/… fallback. This proves the real grades
+// round-trip through PUT → GET so the page renders the catalogue branch
+// (`{#if catalogueMaterials.length > 0}`) instead of the fallback.
+describe('s338: catalogue push delivers real ABERP grades to the /quote dropdown', () => {
+	const REAL_SEED = [
+		{ grade: '6061-T6', display_name: 'Aluminium 6061-T6' },
+		{ grade: '7075-T651', display_name: 'Aluminium 7075-T651' },
+		{ grade: '304', display_name: 'Stainless steel 304' },
+		{ grade: '316', display_name: 'Stainless steel 316' },
+		{ grade: 'Ti-6Al-4V', display_name: 'Titanium Ti-6Al-4V (Grade 5)' },
+		{ grade: 'Inconel 718', display_name: 'Nickel superalloy Inconel 718' },
+		{ grade: 'PEEK', display_name: 'PEEK' }
+	];
+
+	function realSeedBody(): string {
+		return JSON.stringify({
+			materials: REAL_SEED.map((m) => ({
+				...m,
+				stock_status: 'in_stock' as const,
+				lead_time_default_days: 0
+			}))
+		});
+	}
+
+	it('s338_catalogue_push_delivers_snapshot_to_storefront_on_change', async () => {
+		const { PUT } = await loadHandlers();
+		// The push that pre-S338 returned 400 must now return 200 and persist.
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
+		const res = await PUT({ request: bearerReq(realSeedBody()) } as any);
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { received_count: number };
+		expect(body.received_count).toBe(REAL_SEED.length);
+	});
+
+	it('s338_storefront_renders_catalogue_dropdown_when_snapshot_present', async () => {
+		const { PUT, GET } = await loadHandlers();
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
+		await PUT({ request: bearerReq(realSeedBody()) } as any);
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
+		const res = await GET({} as any);
+		const body = (await res.json()) as { materials: { grade: string }[] };
+		// Non-empty snapshot → the page renders the catalogue branch, not the
+		// hard-coded Aluminum/Steel/… fallback.
+		expect(body.materials.length).toBe(REAL_SEED.length);
+		expect(body.materials.map((m) => m.grade)).toContain('6061-T6');
+		expect(body.materials.map((m) => m.grade)).toContain('Inconel 718');
+	});
+});

@@ -31,7 +31,20 @@ export interface CatalogueSnapshot {
 export const GRADE_MAX_LEN = 64;
 export const DISPLAY_NAME_MAX_LEN = 200;
 export const LEAD_TIME_MAX_DAYS = 365;
-const GRADE_RE = /^[A-Z][A-Z0-9_]*$/;
+// S338 — real-world material grades, not sanitized identifiers. The push
+// source is ABERP's `quoting_materials.grade` PRIMARY KEY, which holds the
+// canonical industry designation an operator types ("6061-T6", "304",
+// "Ti-6Al-4V", "Inconel 718", "17-4PH"). The original /^[A-Z][A-Z0-9_]*$/
+// rejected every digit-first / hyphenated / spaced / lowercase grade, so
+// `validateSnapshotBody` 400'd the *entire* push and the snapshot never
+// landed — the live `/quote` fallback-dropdown defect. Accept the charset
+// real grades use (alnum + space . _ + / -) while still requiring an
+// alphanumeric first char and excluding all control chars (no CR/LF/NUL —
+// the closed allowlist inherently rejects them, so grades stay safe as an
+// HTML option value and as the `material_preference` echoed back to ABERP).
+// This is the wire contract; ABERP's catalogue_push regression test pins
+// the same set from the other end.
+const GRADE_RE = /^[A-Za-z0-9][A-Za-z0-9 ._+/-]*$/;
 // eslint-disable-next-line no-control-regex -- intentional: reject CR/LF/NUL injection in pushed display names
 const HEADER_INJECTION_RE = /[\r\n\x00]/;
 
