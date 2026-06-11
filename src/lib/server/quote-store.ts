@@ -72,6 +72,22 @@ export interface QuoteMetadata {
 	accepted_at?: string;
 	acceptance_signature_ts?: string;
 	acceptance_audit_id?: string;
+	/**
+	 * Acceptance provenance (S354 / ADR-0005 amendment). `'customer'` when
+	 * the customer committed the typed-ACCEPT POST via the signed DEAL link;
+	 * `'operator'` when ABERP recorded an off-channel acceptance (phone /
+	 * e-mail / in person) on the customer's behalf over Bearer + HMAC. Both
+	 * land on the same terminal `status: 'approved'` — the difference is who
+	 * confirmed and through what channel, captured here for the audit trail.
+	 * Absent on pre-S354 rows (treat as `'customer'`).
+	 */
+	accepted_via?: 'customer' | 'operator';
+	/** Operator login that recorded the accept (operator path only). */
+	operator_user_id?: string;
+	/** Off-channel medium: `phone` / `email` / `in_person` / `other` (operator path only). */
+	operator_channel?: string;
+	/** Operator free-text note describing the acceptance (operator path only). */
+	operator_note?: string;
 }
 
 function quoteRoot(): string {

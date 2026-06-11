@@ -3,6 +3,10 @@ import { json } from '@sveltejs/kit';
 import { requireAdminAuth } from '$lib/server/auth';
 import { readQuote, writeQuoteAtomic, type QuoteMetadata } from '$lib/server/quote-store';
 import { isQuoteStatus, type QuoteStatus } from '$lib/server/quote-status';
+import {
+	isOperatorAcceptChannel,
+	verifyOperatorAcceptSignature
+} from '$lib/server/operator-accept';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // eslint-disable-next-line no-control-regex -- reject CR/LF/NUL injection in notes
@@ -137,6 +141,18 @@ export const POST: RequestHandler = async ({ params, request }) => {
 
 	const { status, notes } = body as { status?: unknown; notes?: unknown };
 
+	// S354 / ADR-0005 amendment — operator accept-on-behalf. A DISTINCT
+	// transition from the customer-owned typed-ACCEPT: `operator_accepted`
+	// is not a stored status (it is not in QUOTE_STATUSES), it is a signed
+	// *intent* that, when the Bearer (already checked above) AND the HMAC
+	// validate, advances a `quoted` quote to the same terminal `approved`
+	// the customer accept reaches — tagged `accepted_via: 'operator'`. The
+	// plain-Bearer `approved` below stays forbidden; only this signed path
+	// may set `approved` operator-side.
+	if (status === 'operator_accepted') {
+		return handleOperatorAccept(id, body as Record<string, unknown>);
+	}
+
 	if (!isQuoteStatus(status)) {
 		return json({ error: 'Invalid status value.' }, { status: 400 });
 	}
@@ -180,3 +196,108 @@ export const POST: RequestHandler = async ({ params, request }) => {
 	await writeQuoteAtomic(id, updated);
 	return json(updated);
 };
+
+/**
+ * S354 / ADR-0005 amendment — operator accept-on-behalf branch. Requires
+ * (Bearer already validated by `requireAdminAuth` in POST) a valid HMAC
+ * over `{id, channel, accepted_at_ms, operator_user_id}` keyed by the
+ * Bearer secret. On success advances `quoted → approved` with
+ * `accepted_via: 'operator'` and the operator audit fields. Refuses:
+ *   - 400 malformed channel / note / operator_user_id / accepted_at_ms
+ *   - 401 missing or invalid HMAC (refuses to accept without proof)
+ *   - 404 unknown quote
+ *   - 409 already `approved` (idempotency — including a customer accept
+ *         that landed first) or any non-`quoted` source state
+ */
+async function handleOperatorAccept(
+	id: string,
+	body: Record<string, unknown>
+): Promise<Response> {
+	const { channel, note, operator_user_id, accepted_at_ms, hmac_signature } = body;
+
+	if (!isOperatorAcceptChannel(channel)) {
+		return json({ error: 'Invalid channel.' }, { status: 400 });
+	}
+	if (typeof note !== 'string' || note.trim().length === 0) {
+		return json({ error: 'Note is required.' }, { status: 400 });
+	}
+	if (note.length > NOTES_MAX) {
+		return json({ error: 'Notes too long.' }, { status: 400 });
+	}
+	if (HEADER_INJECTION_RE.test(note)) {
+		return json({ error: 'Notes contains invalid characters.' }, { status: 400 });
+	}
+	if (typeof operator_user_id !== 'string' || operator_user_id.trim().length === 0) {
+		return json({ error: 'operator_user_id is required.' }, { status: 400 });
+	}
+	if (
+		typeof accepted_at_ms !== 'number' ||
+		!Number.isFinite(accepted_at_ms) ||
+		!Number.isInteger(accepted_at_ms)
+	) {
+		return json({ error: 'accepted_at_ms must be an integer.' }, { status: 400 });
+	}
+
+	// HMAC is the proof of ABERP origin for this otherwise-forbidden
+	// transition. A missing / malformed / mismatched signature is a flat
+	// 401 — refuse to accept without proof.
+	if (
+		!verifyOperatorAcceptSignature(
+			id,
+			channel,
+			accepted_at_ms,
+			operator_user_id.trim(),
+			hmac_signature
+		)
+	) {
+		return json({ error: 'Invalid operator-accept signature.' }, { status: 401 });
+	}
+
+	const existing = await readQuote(id);
+	if (!existing) return json({ error: 'Not found.' }, { status: 404 });
+
+	// Idempotency: an already-approved quote (operator OR customer) is a
+	// 409 — the accept already happened, ABERP surfaces it and does not
+	// re-write.
+	if (existing.status === 'approved') {
+		return json(
+			{ error: 'already_accepted', from: existing.status, to: 'approved' },
+			{ status: 409 }
+		);
+	}
+	// Operator-accept requires a priced quote — same precondition as the
+	// customer accept link (which is only e-mailed once `quoted`).
+	if (existing.status !== 'quoted') {
+		return json(
+			{
+				error: `forbidden_transition: ${existing.status} → approved (operator-accept requires a quoted quote)`,
+				from: existing.status,
+				to: 'approved'
+			},
+			{ status: 409 }
+		);
+	}
+
+	const now = new Date().toISOString();
+	const trimmedNote = note.trim();
+	const updated: QuoteMetadata = {
+		...existing,
+		status: 'approved',
+		accepted_at: now,
+		accepted_via: 'operator',
+		operator_user_id: operator_user_id.trim(),
+		operator_channel: channel,
+		operator_note: trimmedNote,
+		status_history: [
+			...(existing.status_history ?? []),
+			{
+				at: now,
+				from: existing.status,
+				to: 'approved',
+				notes: `Operator accept on behalf via ${channel}: ${trimmedNote}`
+			}
+		]
+	};
+	await writeQuoteAtomic(id, updated);
+	return json(updated);
+}

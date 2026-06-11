@@ -157,3 +157,55 @@ PR-04 integration tests:
 - Existing token impl — [`src/lib/server/quote-token.ts`](../../src/lib/server/quote-token.ts)
 - ABERP-side §12 (30-day expiry commitment) — `ABERP/docs/design/auto-quoting-ground-zero.md`
 - PR-L brief & implementation — `git log --grep="PR-L"`
+
+---
+
+## Amendment (S354) — operator accept-on-behalf
+
+- **Status:** Accepted
+- **Date:** 2026-06-11
+- **Driver:** S354 / PR-42 — closes audit U16. ABERP counterpart: `ABERP/adr/0072-operator-accept-on-behalf.md`.
+
+### Problem
+
+The typed-ACCEPT scheme above is the **only** path to `approved`, and the status handler deliberately refuses `approved` over a plain Bearer ("approved is only settable by the customer accept POST"). That is correct for the customer-owned link — but it means a customer who accepts **off-channel** (phone / e-mail reply / in person) has no path to `approved` at all. The quote expires unaccepted. ABERP needs a way to record that acceptance on the customer's behalf without weakening the plain-Bearer refusal.
+
+### Decision
+
+Add a **distinct** `operator_accepted` intent to `POST /api/quotes/[id]/status`, permitted only when the Bearer (already required) **and** an HMAC signature both validate. It advances a `quoted` quote to the **same** terminal `approved`, tagged `accepted_via: 'operator'`.
+
+`operator_accepted` is **not** a stored status — it is not added to `QUOTE_STATUSES`. It is a signed verb the handler branches on *before* the `isQuoteStatus` gate; the stored status it produces is the ordinary `approved`, so every downstream consumer (DEAL completion, `invoiced ← approved`) is unchanged.
+
+### The HMAC contract
+
+- **Material:** `HMAC-SHA256(id ‖ "operator_accept" ‖ channel ‖ accepted_at_ms ‖ operator_user_id, secret)`, joined with `|`, lowercase-hex. Implemented in `src/lib/server/operator-accept.ts`; ABERP's signer is `apps/aberp/src/operator_accept.rs`. A shared cross-impl test vector pins the two implementations to the same digest.
+- **Secret:** `ABERP_SITE_ADMIN_TOKEN` — the **Bearer** secret, *not* `QUOTE_STATUS_SIGNING_KEY`. ABERP holds the Bearer (it presents it on every writeback) but not the customer-token signing key, so the Bearer is the only secret shared between the two services. This is a deliberate departure from the customer accept/status tokens, which use `QUOTE_STATUS_SIGNING_KEY`.
+- **Domain separation:** the literal `operator_accept` marker (cf. `"status"` / `"accept"` above) prevents an operator-accept signature being replayed as any other signed surface.
+
+### Why distinct from customer DEAL-token accept
+
+| | Customer typed-ACCEPT | Operator accept-on-behalf |
+|---|---|---|
+| Who proves intent | The customer, via the unique signed link (`id ‖ "accept" ‖ expiry`) keyed by `QUOTE_STATUS_SIGNING_KEY` | ABERP, via Bearer + HMAC (`id ‖ "operator_accept" ‖ …`) keyed by `ABERP_SITE_ADMIN_TOKEN` |
+| Entry point | `POST /q/{id}/accept` (typed `ACCEPT`) | `POST /api/quotes/{id}/status` `{status:'operator_accepted'}` |
+| Provenance recorded | `accepted_via:'customer'`, `acceptance_signature_ts` | `accepted_via:'operator'`, `operator_user_id`, `operator_channel`, `operator_note` |
+| Terminal status | `approved` | `approved` (identical) |
+
+The HMAC is honestly **not** a second authentication factor over the Bearer (a Bearer holder can compute it); its purpose is to *bind the operator-accept fields* and to *gate the otherwise-forbidden transition* behind an explicit signed proof, so the plain-Bearer `approved` refusal remains intact. Replay of the same operator-accept is blocked by the already-`approved` 409, not by a timestamp window.
+
+### Persisted audit fields (extended symmetrically)
+
+`QuoteMetadata` gains `accepted_via` (`'customer' | 'operator'`), `operator_user_id`, `operator_channel`, `operator_note`. The customer accept path now also sets `accepted_via:'customer'` for symmetry (pre-S354 rows omit it — treat as `'customer'`).
+
+### Handler rules
+
+- 400 — malformed `channel` (not in `{phone,email,in_person,other}`) / empty or too-long `note` / non-integer `accepted_at_ms` / missing `operator_user_id`.
+- 401 — missing or invalid HMAC (refuses to accept without proof). Bearer absence is the existing `requireAdminAuth` 401.
+- 404 — unknown quote.
+- 409 — already `approved` (idempotency, incl. a customer accept that landed first) **or** any non-`quoted` source state.
+- 200 — `quoted → approved`, persists the operator audit fields + a `status_history` row.
+
+### Tests (vitest)
+
+- `src/lib/server/operator-accept.spec.ts` — channel vocab, canonical message, the cross-impl HMAC vector (must equal ABERP's Rust pin), verify accept/reject paths.
+- `src/routes/api/quotes/[id]/status/operator-accept-status.spec.ts` — valid HMAC → 200 + `approved` + audit fields; invalid / missing / tampered HMAC → 401; already-approved → 409; non-`quoted` → 409; channel / note validation; and that the customer-owned plain-Bearer `approved` path is **still** 403 (unchanged).

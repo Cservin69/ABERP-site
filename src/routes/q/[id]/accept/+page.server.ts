@@ -186,6 +186,9 @@ export const actions: Actions = {
 			...existing,
 			status: 'approved',
 			accepted_at: now,
+			// S354 — record provenance symmetrically with the operator path
+			// (ADR-0005 amendment). This is the customer-owned typed-ACCEPT.
+			accepted_via: 'customer',
 			acceptance_signature_ts: ts,
 			status_history: [
 				...(existing.status_history ?? []),
