@@ -174,24 +174,24 @@ The typed-ACCEPT scheme above is the **only** path to `approved`, and the status
 
 Add a **distinct** `operator_accepted` intent to `POST /api/quotes/[id]/status`, permitted only when the Bearer (already required) **and** an HMAC signature both validate. It advances a `quoted` quote to the **same** terminal `approved`, tagged `accepted_via: 'operator'`.
 
-`operator_accepted` is **not** a stored status — it is not added to `QUOTE_STATUSES`. It is a signed verb the handler branches on *before* the `isQuoteStatus` gate; the stored status it produces is the ordinary `approved`, so every downstream consumer (DEAL completion, `invoiced ← approved`) is unchanged.
+`operator_accepted` is **not** a stored status — it is not added to `QUOTE_STATUSES`. It is a signed verb the handler branches on _before_ the `isQuoteStatus` gate; the stored status it produces is the ordinary `approved`, so every downstream consumer (DEAL completion, `invoiced ← approved`) is unchanged.
 
 ### The HMAC contract
 
 - **Material:** `HMAC-SHA256(id ‖ "operator_accept" ‖ channel ‖ accepted_at_ms ‖ operator_user_id, secret)`, joined with `|`, lowercase-hex. Implemented in `src/lib/server/operator-accept.ts`; ABERP's signer is `apps/aberp/src/operator_accept.rs`. A shared cross-impl test vector pins the two implementations to the same digest.
-- **Secret:** `ABERP_SITE_ADMIN_TOKEN` — the **Bearer** secret, *not* `QUOTE_STATUS_SIGNING_KEY`. ABERP holds the Bearer (it presents it on every writeback) but not the customer-token signing key, so the Bearer is the only secret shared between the two services. This is a deliberate departure from the customer accept/status tokens, which use `QUOTE_STATUS_SIGNING_KEY`.
+- **Secret:** `ABERP_SITE_ADMIN_TOKEN` — the **Bearer** secret, _not_ `QUOTE_STATUS_SIGNING_KEY`. ABERP holds the Bearer (it presents it on every writeback) but not the customer-token signing key, so the Bearer is the only secret shared between the two services. This is a deliberate departure from the customer accept/status tokens, which use `QUOTE_STATUS_SIGNING_KEY`.
 - **Domain separation:** the literal `operator_accept` marker (cf. `"status"` / `"accept"` above) prevents an operator-accept signature being replayed as any other signed surface.
 
 ### Why distinct from customer DEAL-token accept
 
-| | Customer typed-ACCEPT | Operator accept-on-behalf |
-|---|---|---|
-| Who proves intent | The customer, via the unique signed link (`id ‖ "accept" ‖ expiry`) keyed by `QUOTE_STATUS_SIGNING_KEY` | ABERP, via Bearer + HMAC (`id ‖ "operator_accept" ‖ …`) keyed by `ABERP_SITE_ADMIN_TOKEN` |
-| Entry point | `POST /q/{id}/accept` (typed `ACCEPT`) | `POST /api/quotes/{id}/status` `{status:'operator_accepted'}` |
-| Provenance recorded | `accepted_via:'customer'`, `acceptance_signature_ts` | `accepted_via:'operator'`, `operator_user_id`, `operator_channel`, `operator_note` |
-| Terminal status | `approved` | `approved` (identical) |
+|                     | Customer typed-ACCEPT                                                                                   | Operator accept-on-behalf                                                                 |
+| ------------------- | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Who proves intent   | The customer, via the unique signed link (`id ‖ "accept" ‖ expiry`) keyed by `QUOTE_STATUS_SIGNING_KEY` | ABERP, via Bearer + HMAC (`id ‖ "operator_accept" ‖ …`) keyed by `ABERP_SITE_ADMIN_TOKEN` |
+| Entry point         | `POST /q/{id}/accept` (typed `ACCEPT`)                                                                  | `POST /api/quotes/{id}/status` `{status:'operator_accepted'}`                             |
+| Provenance recorded | `accepted_via:'customer'`, `acceptance_signature_ts`                                                    | `accepted_via:'operator'`, `operator_user_id`, `operator_channel`, `operator_note`        |
+| Terminal status     | `approved`                                                                                              | `approved` (identical)                                                                    |
 
-The HMAC is honestly **not** a second authentication factor over the Bearer (a Bearer holder can compute it); its purpose is to *bind the operator-accept fields* and to *gate the otherwise-forbidden transition* behind an explicit signed proof, so the plain-Bearer `approved` refusal remains intact. Replay of the same operator-accept is blocked by the already-`approved` 409, not by a timestamp window.
+The HMAC is honestly **not** a second authentication factor over the Bearer (a Bearer holder can compute it); its purpose is to _bind the operator-accept fields_ and to _gate the otherwise-forbidden transition_ behind an explicit signed proof, so the plain-Bearer `approved` refusal remains intact. Replay of the same operator-accept is blocked by the already-`approved` 409, not by a timestamp window.
 
 ### Persisted audit fields (extended symmetrically)
 

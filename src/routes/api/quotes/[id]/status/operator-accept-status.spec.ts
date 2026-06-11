@@ -87,11 +87,7 @@ function sign(
 	return createHmac('sha256', secret).update(msg).digest('hex');
 }
 
-function acceptReq(
-	id: string,
-	body: Record<string, unknown>,
-	opts?: { token?: string }
-): Request {
+function acceptReq(id: string, body: Record<string, unknown>, opts?: { token?: string }): Request {
 	const headers: Record<string, string> = { 'content-type': 'application/json' };
 	if (opts?.token !== '') {
 		headers['authorization'] = `Bearer ${opts?.token ?? ADMIN_TOKEN}`;
@@ -179,11 +175,7 @@ describe('POST /api/quotes/{id}/status — operator accept-on-behalf', () => {
 		const { POST } = await loadHandler();
 		seedQuote(QUOTE_ID, 'quoted');
 		// signature was computed for 'phone' but the body says 'email'.
-		const res = await call(
-			POST,
-			QUOTE_ID,
-			acceptReq(QUOTE_ID, validBody({ channel: 'email' }))
-		);
+		const res = await call(POST, QUOTE_ID, acceptReq(QUOTE_ID, validBody({ channel: 'email' })));
 		expect(res.status).toBe(401);
 		expect(readSeeded(QUOTE_ID).status).toBe('quoted');
 	});

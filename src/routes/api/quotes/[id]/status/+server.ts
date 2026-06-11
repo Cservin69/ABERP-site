@@ -209,10 +209,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
  *   - 409 already `approved` (idempotency — including a customer accept
  *         that landed first) or any non-`quoted` source state
  */
-async function handleOperatorAccept(
-	id: string,
-	body: Record<string, unknown>
-): Promise<Response> {
+async function handleOperatorAccept(id: string, body: Record<string, unknown>): Promise<Response> {
 	const { channel, note, operator_user_id, accepted_at_ms, hmac_signature } = body;
 
 	if (!isOperatorAcceptChannel(channel)) {

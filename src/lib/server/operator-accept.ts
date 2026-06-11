@@ -30,8 +30,7 @@ export type OperatorAcceptChannel = (typeof OPERATOR_ACCEPT_CHANNELS)[number];
 
 export function isOperatorAcceptChannel(value: unknown): value is OperatorAcceptChannel {
 	return (
-		typeof value === 'string' &&
-		(OPERATOR_ACCEPT_CHANNELS as readonly string[]).includes(value)
+		typeof value === 'string' && (OPERATOR_ACCEPT_CHANNELS as readonly string[]).includes(value)
 	);
 }
 
