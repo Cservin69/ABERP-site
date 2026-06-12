@@ -1,8 +1,44 @@
 import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
-import { resolve as pathResolve, join } from 'node:path';
+import { resolve as pathResolve, join, isAbsolute } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-const QUOTE_DIR = process.env.ABERP_SITE_QUOTE_DIR ?? './data/quotes';
+/**
+ * Canonical quote state dir. S356 — `QUOTE_DIR` previously defaulted to the
+ * process-CWD-relative `./data/quotes`, which `pathResolve` anchored INSIDE
+ * the immutable release directory on Lightsail. The systemd unit runs
+ * `ProtectSystem=strict` and only whitelists `/home/aberp/data` under
+ * `ReadWritePaths=`, so every redeploy wiped the quote store: a customer
+ * submission landed in the release dir, the next deploy swapped the release
+ * dir, and `GET /api/quotes/{id}/priced` then 404'd because `metadata.json`
+ * was gone. CloudFront's `404→/index.html` rule masked that 404 as a 200
+ * text/html SPA shell, which ABERP's S347 classifier mislabels as
+ * `RoutingMisconfigured`. Same path-resolution defect S311 fixed for the
+ * email outbox and S343 for the catalogue; same fix, same canonical state
+ * dir, same boot-check posture (F-QUOTE in `boot-checks.ts`). Application
+ * state must live OUTSIDE any release dir.
+ */
+const QUOTE_DIR_DEFAULT = '/home/aberp/data/quotes';
+
+/**
+ * Resolve the quote dir at call time (not module-load) so tests and the
+ * systemd unit can override via `ABERP_SITE_QUOTE_DIR`. Throws on a relative
+ * path — a CWD-relative path silently lands inside the deploy-volatile
+ * release dir, which is exactly the bug this guards against.
+ */
+export function resolveQuoteDir(): string {
+	const raw = process.env.ABERP_SITE_QUOTE_DIR ?? QUOTE_DIR_DEFAULT;
+	if (!isAbsolute(raw)) {
+		throw new Error(
+			`ABERP_SITE_QUOTE_DIR must be an absolute path; got "${raw}". ` +
+				'A process-CWD-relative path resolves inside the immutable release dir, ' +
+				'so the quote store is lost on every redeploy.'
+		);
+	}
+	return raw;
+}
+
+/** Exported so boot-checks can mention the canonical default in error copy. */
+export const QUOTE_DIR_DEFAULT_PATH = QUOTE_DIR_DEFAULT;
 
 export interface QuoteFileEntry {
 	filename: string;
@@ -91,7 +127,9 @@ export interface QuoteMetadata {
 }
 
 function quoteRoot(): string {
-	return pathResolve(QUOTE_DIR);
+	// `pathResolve` normalizes any trailing slash / `..` so the
+	// `startsWith(root + '/')` traversal guard in `quoteDir` stays sound.
+	return pathResolve(resolveQuoteDir());
 }
 
 function quoteDir(id: string): string | null {

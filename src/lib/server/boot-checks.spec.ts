@@ -24,14 +24,20 @@ const PROD_ENV = {
 	BODY_SIZE_LIMIT: String(EXPECTED_BODY_SIZE_LIMIT),
 	ABERP_SITE_OPERATOR_EMAIL: 'ops@abenerp.com',
 	ABERP_SITE_EMAIL_OUTBOX_DIR: '/home/aberp/data/email-outbox',
-	ABERP_SITE_CATALOGUE_DIR: '/home/aberp/data/catalogue'
+	ABERP_SITE_CATALOGUE_DIR: '/home/aberp/data/catalogue',
+	ABERP_SITE_QUOTE_DIR: '/home/aberp/data/quotes'
 };
 const OK_PROBE = (): OutboxDirProbeResult => ({ ok: true });
-// S343: the catalogue F-CAT check uses the same real probe by default, so
-// PROD_ENV-driven tests stub it green the same way they stub the outbox probe.
-// Without this the real probe would mkdir `/home/aberp/data/catalogue` on the
-// CI runner and the green-path assertion (problems length 0) would fail.
-const OK_PROBES = { outboxDirProbe: OK_PROBE, catalogueDirProbe: OK_PROBE };
+// S343/S356: the catalogue F-CAT and quote F-QUOTE checks use the same real
+// probe by default, so PROD_ENV-driven tests stub them green the same way they
+// stub the outbox probe. Without this the real probe would mkdir
+// `/home/aberp/data/...` on the CI runner and the green-path assertion
+// (problems length 0) would fail.
+const OK_PROBES = {
+	outboxDirProbe: OK_PROBE,
+	catalogueDirProbe: OK_PROBE,
+	quoteDirProbe: OK_PROBE
+};
 
 describe('runBootChecks — green path', () => {
 	it('returns ok=true when BODY_SIZE_LIMIT and the operator inbox and outbox dir are present', () => {
@@ -200,6 +206,57 @@ describe('runBootChecks — F-CAT catalogue dir writability (S343)', () => {
 			}
 		});
 		expect(seenDir).toBe('/home/aberp/data/catalogue');
+	});
+});
+
+describe('runBootChecks — F-QUOTE quote dir writability (S356)', () => {
+	it('s356_boot_check_passes_when_dir_writable', () => {
+		const v = runBootChecks({ env: PROD_ENV, ...OK_PROBES });
+		expect(v.problems.map((p) => p.finding)).not.toContain('F-QUOTE');
+		expect(v.ok).toBe(true);
+	});
+
+	it('s356_boot_check_fails_with_actionable_message_when_not_writable', () => {
+		const v = runBootChecks({
+			env: PROD_ENV,
+			outboxDirProbe: OK_PROBE,
+			catalogueDirProbe: OK_PROBE,
+			quoteDirProbe: () => ({ ok: false, reason: 'EACCES: permission denied' })
+		});
+		expect(v.ok).toBe(false);
+		const fq = v.problems.find((p) => p.finding === 'F-QUOTE');
+		expect(fq).toBeDefined();
+		expect(fq?.message).toContain('EACCES');
+		expect(fq?.message).toContain('/home/aberp/data/quotes');
+		expect(fq?.message).toContain('ReadWritePaths');
+	});
+
+	it('flags F-QUOTE via the real probe when ABERP_SITE_QUOTE_DIR is relative', () => {
+		const v = runBootChecks({
+			env: { ...PROD_ENV, ABERP_SITE_QUOTE_DIR: './data/quotes' },
+			outboxDirProbe: OK_PROBE,
+			catalogueDirProbe: OK_PROBE
+		});
+		expect(v.ok).toBe(false);
+		const fq = v.problems.find((p) => p.finding === 'F-QUOTE');
+		expect(fq).toBeDefined();
+		expect(fq?.message).toContain('not absolute');
+	});
+
+	it('falls back to the canonical quote default path when the env is unset', () => {
+		const env = { ...PROD_ENV };
+		delete (env as Partial<typeof env>).ABERP_SITE_QUOTE_DIR;
+		let seenDir: string | null = null;
+		runBootChecks({
+			env,
+			outboxDirProbe: OK_PROBE,
+			catalogueDirProbe: OK_PROBE,
+			quoteDirProbe: (dir) => {
+				seenDir = dir;
+				return { ok: true };
+			}
+		});
+		expect(seenDir).toBe('/home/aberp/data/quotes');
 	});
 });
 

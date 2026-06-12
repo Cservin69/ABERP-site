@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { verifyBodySizeLimit } from './body-size-limit';
 import { OUTBOX_DIR_DEFAULT_PATH } from './email-outbox';
 import { CATALOGUE_DIR_DEFAULT_PATH } from './catalogue-store';
+import { QUOTE_DIR_DEFAULT_PATH } from './quote-store';
 
 /**
  * Refuse-to-start boot checks. The S285 review flagged two
@@ -66,6 +67,7 @@ interface BootCheckOptions {
 		ABERP_SITE_OPERATOR_EMAIL: string;
 		ABERP_SITE_EMAIL_OUTBOX_DIR: string;
 		ABERP_SITE_CATALOGUE_DIR: string;
+		ABERP_SITE_QUOTE_DIR: string;
 	}>;
 	/**
 	 * Override the outbox-dir writability probe — tests stub this so they can
@@ -79,6 +81,11 @@ interface BootCheckOptions {
 	 * W_OK + sentinel) when unset.
 	 */
 	catalogueDirProbe?: (dir: string) => OutboxDirProbeResult;
+	/**
+	 * Override the quote-dir writability probe — same rationale as
+	 * `outboxDirProbe`. Reuses the `probeOutboxDirSync` round-trip when unset.
+	 */
+	quoteDirProbe?: (dir: string) => OutboxDirProbeResult;
 }
 
 export type OutboxDirProbeResult = { ok: true } | { ok: false; reason: string };
@@ -195,6 +202,42 @@ function checkCatalogueDir(
 }
 
 /**
+ * ## S356 / F-QUOTE — quote dir writability
+ *
+ * Same shape as F15 and F-CAT, for the customer-quote store. `quote-store.ts`
+ * defaulted to the process-CWD-relative `./data/quotes`, which `pathResolve`
+ * anchored inside the immutable release dir on Lightsail. Unlike the catalogue
+ * (which 500s loudly on the EROFS write), the quote dir got created fine inside
+ * the release dir — and was then SILENTLY discarded on the next deploy, taking
+ * every `metadata.json` with it. The downstream symptom was a `GET
+ * /api/quotes/{id}/priced` 404 that CloudFront's `404→/index.html` rule masked
+ * as a 200 text/html SPA shell, which ABERP misread as a CDN routing fault. The
+ * default is now `/home/aberp/data/quotes`, the same canonical state dir as the
+ * outbox and catalogue, and F-QUOTE proves the directory is absolute, present,
+ * and writable at boot using the same `probeOutboxDirSync` round-trip.
+ */
+function checkQuoteDir(
+	env: BootCheckOptions['env'],
+	probe: BootCheckOptions['quoteDirProbe']
+): BootCheckProblem | null {
+	const raw =
+		env?.ABERP_SITE_QUOTE_DIR ?? process.env.ABERP_SITE_QUOTE_DIR ?? QUOTE_DIR_DEFAULT_PATH;
+	const probeFn = probe ?? probeOutboxDirSync;
+	const result = probeFn(raw);
+	if (result.ok) return null;
+	return {
+		finding: 'F-QUOTE',
+		message:
+			`[aberp-site] ABERP_SITE_QUOTE_DIR="${raw}" is not usable: ` +
+			`${result.reason}. ` +
+			`Set it to ${QUOTE_DIR_DEFAULT_PATH} (the same canonical state dir as the email ` +
+			`outbox and catalogue) and make sure the systemd unit's ReadWritePaths includes ` +
+			`/home/aberp/data. A CWD-relative quote path lands inside the immutable release ` +
+			`dir and is wiped on every redeploy, 404-ing every priced writeback afterwards.`
+	};
+}
+
+/**
  * Pure verification — does not throw or exit. Returns a verdict the caller
  * (hooks.server.ts) decides what to do with.
  */
@@ -214,6 +257,9 @@ export function runBootChecks(opts: BootCheckOptions = {}): BootCheckResult {
 
 	const catalogueProblem = checkCatalogueDir(opts.env, opts.catalogueDirProbe);
 	if (catalogueProblem) problems.push(catalogueProblem);
+
+	const quoteProblem = checkQuoteDir(opts.env, opts.quoteDirProbe);
+	if (quoteProblem) problems.push(quoteProblem);
 
 	return { ok: problems.length === 0, problems };
 }
