@@ -2,7 +2,11 @@ import { error } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { readQuote } from '$lib/server/quote-store';
 import { verifyQuoteToken } from '$lib/server/quote-token';
-import { quoteStatusLabel } from '$lib/server/quote-status';
+import {
+	extractRefusalReason,
+	quoteStatusLabel,
+	truncateRefusalReason
+} from '$lib/server/quote-status';
 
 export const prerender = false;
 export const ssr = true;
@@ -45,6 +49,13 @@ export const load: PageServerLoad = async ({ params, url }) => {
 		toLabel: quoteStatusLabel(h.to)
 	}));
 
+	// S403 — when the operator refused (storefront `rejected`), surface the
+	// reason they gave (carried in the transition notes), defensively
+	// truncated for display.
+	const refusalReasonRaw =
+		quote.status === 'rejected' ? extractRefusalReason(quote.status_history) : null;
+	const refusalReason = refusalReasonRaw ? truncateRefusalReason(refusalReasonRaw) : null;
+
 	// Pricing surface — only set when ABERP has written back. The PDF URL re-uses
 	// the same status token so the customer's existing link works for both views.
 	const pricing = quote.pricing
@@ -73,7 +84,8 @@ export const load: PageServerLoad = async ({ params, url }) => {
 			history,
 			receivedLabel: quoteStatusLabel('received'),
 			pricing,
-			pricingPending
+			pricingPending,
+			refusalReason
 		},
 		expectedResponseBy
 	};
