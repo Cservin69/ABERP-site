@@ -13,11 +13,39 @@
 	// Once the action returns `accepted`, the visual switches to the thank-you
 	// state regardless of whether the load returned `confirm` or
 	// `already-approved`. `form?.alreadyApproved` distinguishes a fresh accept
-	// from an idempotent replay so we can show the same copy either way.
+	// from an idempotent replay so we show the right copy either way.
 	const accepted = $derived(form?.accepted === true);
 	const alreadyApproved = $derived(
 		data.view === 'already-approved' || form?.alreadyApproved === true
 	);
+
+	// The already-accepted surface (Bug #7) shows *when* it was accepted, the
+	// current ledger status, and a link back to the full timeline. These come
+	// from the action result on a replayed POST, else from the load on a
+	// re-clicked link. Labels are resolved server-side ($lib/server/quote-status
+	// can't be imported here).
+	const acceptedAt = $derived(
+		form?.acceptedAt ?? (data.view === 'already-approved' ? data.acceptedAt : null)
+	);
+	const statusLabel = $derived(
+		form?.statusLabel ?? (data.view === 'already-approved' ? data.quote.statusLabel : null)
+	);
+	const statusUrl = $derived(
+		form?.statusUrl ?? (data.view === 'already-approved' ? data.statusUrl : null)
+	);
+
+	function formatDate(iso: string | null): string {
+		if (!iso) return '';
+		const d = new Date(iso);
+		if (Number.isNaN(d.getTime())) return iso;
+		return d.toISOString().replace('T', ' ').slice(0, 16) + 'Z';
+	}
+
+	// Inline "when" fragments built in script so the markup stays free of
+	// string-literal mustaches (svelte/no-useless-mustaches). Empty when the
+	// acceptance timestamp is unknown.
+	const acceptedAtHu = $derived(acceptedAt ? ` (${formatDate(acceptedAt)})` : '');
+	const acceptedAtEn = $derived(acceptedAt ? ` on ${formatDate(acceptedAt)}` : '');
 </script>
 
 <svelte:head>
@@ -38,7 +66,31 @@
 			</div>
 		</header>
 
-		{#if accepted || alreadyApproved}
+		{#if alreadyApproved}
+			<section class="block accepted">
+				<h2>Már elfogadva / Already accepted</h2>
+				<p>
+					Ezt az ajánlatot <strong>már elfogadtad</strong>{acceptedAtHu}. Nincs további teendőd — a
+					megrendelés feldolgozása folyamatban van.
+				</p>
+				<p class="en">
+					This quote was <strong>already accepted</strong>{acceptedAtEn}. Nothing more to do — your
+					order is being processed.
+				</p>
+				{#if statusLabel}
+					<p class="hint">
+						Az ajánlat státusza / Current status:
+						<strong>{statusLabel.hu} · {statusLabel.en}</strong>
+					</p>
+				{/if}
+				{#if statusUrl}
+					<p class="status-link-wrap">
+						<a class="status-link" href={statusUrl}>Állapot megtekintése / View status timeline →</a
+						>
+					</p>
+				{/if}
+			</section>
+		{:else if accepted}
 			<section class="block accepted">
 				<h2>Elfogadva / Accepted</h2>
 				<p>
@@ -54,6 +106,12 @@
 					Visszaigazoló e-mailt is küldtünk a {data.quote.contact.email} címre. / A confirmation email
 					has been sent to {data.quote.contact.email}.
 				</p>
+				{#if statusUrl}
+					<p class="status-link-wrap">
+						<a class="status-link" href={statusUrl}>Állapot megtekintése / View status timeline →</a
+						>
+					</p>
+				{/if}
 			</section>
 		{:else if data.view === 'confirm'}
 			<section class="block ownership">
@@ -407,5 +465,25 @@
 		margin: 1rem 0 0;
 		font-size: 0.82rem;
 		color: rgba(243, 238, 229, 0.6);
+	}
+
+	.status-link-wrap {
+		margin: 1.1rem 0 0;
+	}
+
+	.status-link {
+		display: inline-block;
+		padding: 0.55rem 0.95rem;
+		border: 1px solid rgba(212, 165, 116, 0.55);
+		border-radius: 2px;
+		color: #f3eee5;
+		text-decoration: none;
+		font-size: 0.9rem;
+		background: rgba(212, 165, 116, 0.1);
+	}
+
+	.status-link:hover {
+		background: rgba(212, 165, 116, 0.2);
+		color: #d4a574;
 	}
 </style>

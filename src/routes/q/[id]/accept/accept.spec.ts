@@ -471,3 +471,104 @@ describe('POST /q/{id}/accept — accept action', () => {
 		expect(existsSync('/home/aberp/data/email-outbox/queued')).toBe(false);
 	});
 });
+
+// S398 / Bug #7 — the already-accepted landing must cover EVERY post-accept
+// state, not just `approved`. Before S398, ABERP's intake flipped an accepted
+// quote to `invoiced` within seconds (Bug #3); a customer's second accept click
+// then saw `invoiced` (not `approved`), missed the friendly branch, and hit the
+// generic `error(409)` that the route's +error.svelte mislabeled "the link is
+// invalid or expired (409)". Now any of approved/processing/invoiced renders the
+// friendly "Már elfogadva / Already accepted" page with the current status and a
+// link back to the timeline.
+describe('S398 / Bug #7 — already-accepted landing across all post-accept states', () => {
+	function actionEvent(
+		id: string,
+		ts: string,
+		sig: string,
+		fields: Record<string, string>
+	): unknown {
+		const form = new FormData();
+		for (const [k, v] of Object.entries(fields)) form.set(k, v);
+		return {
+			params: { id },
+			url: url(id, ts, sig),
+			request: new Request(`http://localhost/q/${id}/accept`, {
+				method: 'POST',
+				body: form
+			})
+		};
+	}
+
+	for (const state of ['approved', 'processing', 'invoiced'] as const) {
+		it(`GET renders already-approved (not 409) when the quote is ${state}`, async () => {
+			seedQuote(QUOTE_ID, state, {
+				pricing: pricingFor(),
+				accepted_at: '2026-06-14T05:46:00.000Z'
+			});
+			const { load } = await loadModule();
+			const { ts, sig } = await freshSig(QUOTE_ID);
+			const event = {
+				params: { id: QUOTE_ID },
+				url: url(QUOTE_ID, ts, sig),
+				setHeaders: () => {}
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
+			} as any;
+			const data = await load(event);
+			expect((data as { view: string }).view).toBe('already-approved');
+			// Carries the acceptance timestamp + a status-token link back to /q/{id}.
+			expect((data as { acceptedAt: string }).acceptedAt).toBe('2026-06-14T05:46:00.000Z');
+			expect((data as { statusUrl: string }).statusUrl).toContain(`/q/${QUOTE_ID}?t=`);
+			// Ledger truth: the projected status label is the quote's REAL state.
+			expect((data as { quote: { statusLabel: { en: string } } }).quote.statusLabel.en).not.toBe(
+				''
+			);
+		});
+	}
+
+	it('POST replay on a quote ABERP advanced to processing returns structured already_accepted', async () => {
+		// Customer accepts; ABERP intake then flips the row to `processing`
+		// (draft staged). A second accept click arrives.
+		seedQuote(QUOTE_ID, 'quoted', { pricing: pricingFor() });
+		const { actions } = await loadModule();
+		const { ts, sig } = await freshSig(QUOTE_ID);
+		const ev1 = actionEvent(QUOTE_ID, ts, sig, { accept_token: 'ACCEPT' });
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
+		const first = await (actions.default as (e: any) => Promise<any>)(ev1);
+		expect((first as { alreadyApproved: boolean }).alreadyApproved).toBe(false);
+		expect((first as { statusUrl: string }).statusUrl).toContain(`/q/${QUOTE_ID}?t=`);
+
+		// ABERP intake writeback: approved → processing.
+		const meta = readSeeded(QUOTE_ID);
+		meta.status = 'processing';
+		writeFileSync(join(TMP_ROOT, QUOTE_ID, 'metadata.json'), JSON.stringify(meta, null, 2), 'utf8');
+
+		const ev2 = actionEvent(QUOTE_ID, ts, sig, { accept_token: 'ACCEPT' });
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
+		const second = await (actions.default as (e: any) => Promise<any>)(ev2);
+		// Friendly idempotent replay — NOT a thrown 409.
+		expect((second as { accepted: boolean }).accepted).toBe(true);
+		expect((second as { alreadyApproved: boolean }).alreadyApproved).toBe(true);
+		expect((second as { error: string }).error).toBe('already_accepted');
+		expect((second as { status: string }).status).toBe('processing');
+		expect((second as { statusLabel: { en: string } }).statusLabel.en).toBe('In progress');
+		expect((second as { statusUrl: string }).statusUrl).toContain(`/q/${QUOTE_ID}?t=`);
+		// The replay did NOT mutate the row.
+		expect(readSeeded(QUOTE_ID).status).toBe('processing');
+	});
+
+	it('POST replay on an already-invoiced quote returns already_accepted, never a 409', async () => {
+		seedQuote(QUOTE_ID, 'invoiced', {
+			pricing: pricingFor(),
+			accepted_at: '2026-06-14T05:46:00.000Z'
+		});
+		const { actions } = await loadModule();
+		const { ts, sig } = await freshSig(QUOTE_ID);
+		const ev = actionEvent(QUOTE_ID, ts, sig, { accept_token: 'ACCEPT' });
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
+		const res = await (actions.default as (e: any) => Promise<any>)(ev);
+		expect((res as { accepted: boolean }).accepted).toBe(true);
+		expect((res as { alreadyApproved: boolean }).alreadyApproved).toBe(true);
+		expect((res as { status: string }).status).toBe('invoiced');
+		expect((res as { acceptedAt: string }).acceptedAt).toBe('2026-06-14T05:46:00.000Z');
+	});
+});

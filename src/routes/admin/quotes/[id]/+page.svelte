@@ -432,6 +432,10 @@
 		background: rgba(120, 184, 120, 0.16);
 		color: #9fd49f;
 	}
+	.chip.status-processing {
+		background: rgba(94, 156, 211, 0.16);
+		color: #88c0e8;
+	}
 	.chip.status-rejected {
 		background: rgba(198, 106, 106, 0.16);
 		color: #e8a8a8;

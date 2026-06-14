@@ -27,14 +27,25 @@ const NOTES_MAX = 2000;
  *                the breakdown + PDF that make `quoted` meaningful).
  *   - `approved` FORBIDDEN here — only the customer accept POST can set it
  *                (typed-ACCEPT is the *only* path; ADR-0005's whole point).
+ *   - `processing` only from `approved` (S398 — ABERP's intake daemon picked
+ *                up the customer's acceptance and staged an internal DRAFT
+ *                invoice. This is NOT a fiscal invoice and NOT a DEAL/operator
+ *                confirmation; it is the truthful "we're processing your
+ *                accepted order" way-station. Before S398 the daemon wrote
+ *                `invoiced` here, mislabeling a not-yet-invoiced quote as
+ *                invoiced on the customer portal — Bug #3, a fiscal
+ *                misrepresentation.)
  *   - `rejected` from any non-terminal state (operator-side decline).
- *   - `invoiced` only from `approved` (ABERP DEAL completion confirms the
- *                customer's prior consent).
+ *   - `invoiced` only from `approved` or `processing` — a REAL fiscal invoice
+ *                ledger event. ABERP writes this only on actual issuance,
+ *                never on draft staging.
  *
  * Terminal states (`approved` / `rejected` / `invoiced`) are an absorbing
- * barrier — no transition out is permitted on this handler. Idempotent
- * same-state writes (e.g. `quoting → quoting`) are accepted as no-ops so
- * an ABERP-side retry of the same writeback does not 409.
+ * barrier for the *rejected* path — once approved/rejected/invoiced an operator
+ * decline is refused. `processing` is deliberately NOT terminal: it is a
+ * way-station between `approved` and `invoiced`. Idempotent same-state writes
+ * (e.g. `quoting → quoting`) are accepted as no-ops so an ABERP-side retry of
+ * the same writeback does not 409.
  */
 const TERMINAL_STATES = new Set<QuoteStatus>(['approved', 'rejected', 'invoiced']);
 
@@ -101,12 +112,28 @@ function checkTransition(from: string, to: QuoteStatus): TransitionVerdict {
 		};
 	}
 
-	if (to === 'invoiced') {
+	if (to === 'processing') {
+		// S398 — ABERP intake pickup of an accepted quote. Only `approved →
+		// processing` is legal; everything else (the daemon should never see a
+		// non-approved row from its `?status=approved` poll) gates here.
 		if (from === 'approved') return { ok: true };
 		return {
 			ok: false,
 			status: 409,
-			error: `forbidden_transition: ${from} → invoiced (only approved → invoiced is allowed)`
+			error: `forbidden_transition: ${from} → processing (only approved → processing is allowed)`
+		};
+	}
+
+	if (to === 'invoiced') {
+		// A real fiscal invoice can follow either the bare accepted state or the
+		// processing way-station. `approved → invoiced` is preserved for a direct
+		// post-DEAL issuance writeback; `processing → invoiced` for the normal
+		// intake → issuance path (S398).
+		if (from === 'approved' || from === 'processing') return { ok: true };
+		return {
+			ok: false,
+			status: 409,
+			error: `forbidden_transition: ${from} → invoiced (only approved/processing → invoiced is allowed)`
 		};
 	}
 

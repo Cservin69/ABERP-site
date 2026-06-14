@@ -1,7 +1,7 @@
 import { error, fail } from '@sveltejs/kit';
 import type { PageServerLoad, Actions } from './$types';
 import { readQuote, writeQuoteAtomic, type QuoteMetadata } from '$lib/server/quote-store';
-import { verifyAcceptToken } from '$lib/server/quote-token';
+import { verifyAcceptToken, signQuoteToken } from '$lib/server/quote-token';
 import { quoteStatusLabel } from '$lib/server/quote-status';
 import { sendAcceptedConfirmationEmail } from '$lib/server/email';
 
@@ -9,6 +9,19 @@ export const prerender = false;
 export const ssr = true;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Every state a quote can be in once a successful accept has already landed.
+ * The customer accept POST advances `quoted → approved`; ABERP's pipeline then
+ * advances `approved → processing → invoiced`. A re-clicked accept link on ANY
+ * of these is an idempotent replay — it must render the friendly "already
+ * accepted" page with the current status, never a hard 409 (Bug #7: before
+ * S398 only `approved` was treated as already-accepted, so a second click that
+ * arrived after ABERP flipped the row to `invoiced`/`processing` fell through
+ * to the generic `error(409, …)` and the route's `+error.svelte` mislabeled it
+ * "the link is invalid or expired (409)").
+ */
+const ALREADY_ACCEPTED_STATES = new Set(['approved', 'processing', 'invoiced']);
 
 /**
  * The literal token the customer must type into the form to commit acceptance.
@@ -98,13 +111,19 @@ export const load: PageServerLoad = async ({ params, url, setHeaders }) => {
 		pragma: 'no-cache'
 	});
 
-	// Idempotent landing: a re-clicked link on an already-approved quote shows
-	// the "already accepted" page instead of a hard 409 (ADR-0005 §"Single-use
-	// enforcement" — the customer-facing surface renders this friendly).
-	if (quote.status === 'approved') {
+	// Idempotent landing: a re-clicked link on an already-accepted quote (in
+	// `approved`, or any later pipeline state) shows the "already accepted" page
+	// instead of a hard 409 (ADR-0005 §"Single-use enforcement" — the customer-
+	// facing surface renders this friendly). We mint the customer's own status
+	// token so the page can link back to /q/{id}, where the full ledger-truthful
+	// timeline lives.
+	if (ALREADY_ACCEPTED_STATES.has(quote.status)) {
+		const statusToken = signQuoteToken(quote.id);
 		return {
 			view: 'already-approved' as const,
-			quote: projectForCustomer(quote, null),
+			quote: projectForCustomer(quote, statusToken),
+			acceptedAt: quote.accepted_at ?? null,
+			statusUrl: `/q/${encodeURIComponent(quote.id)}?t=${encodeURIComponent(statusToken)}`,
 			expiryTs: ts
 		};
 	}
@@ -152,11 +171,23 @@ export const actions: Actions = {
 		const existing = await readQuote(id);
 		if (!existing) throw error(404, 'Not found.');
 
-		// Idempotent replay: a second valid POST on an already-approved quote
-		// returns the "accepted" state without re-writing the file or re-sending
-		// the confirmation email. No double-write, no double-relay.
-		if (existing.status === 'approved') {
-			return { accepted: true, alreadyApproved: true };
+		// Idempotent replay: a second valid POST on an already-accepted quote (in
+		// `approved` or any later pipeline state) returns the "accepted" state
+		// without re-writing the file or re-sending the confirmation email. No
+		// double-write, no double-relay. The structured `error: 'already_accepted'`
+		// + `status` + `acceptedAt` let the page render "Már elfogadva …, az
+		// ajánlat státusza: …" with a link back to the timeline (Bug #7).
+		if (ALREADY_ACCEPTED_STATES.has(existing.status)) {
+			const statusToken = signQuoteToken(existing.id);
+			return {
+				accepted: true,
+				alreadyApproved: true,
+				error: 'already_accepted',
+				status: existing.status,
+				statusLabel: quoteStatusLabel(existing.status),
+				acceptedAt: existing.accepted_at ?? null,
+				statusUrl: `/q/${encodeURIComponent(existing.id)}?t=${encodeURIComponent(statusToken)}`
+			};
 		}
 
 		if (existing.status !== 'quoted') {
@@ -202,6 +233,14 @@ export const actions: Actions = {
 		};
 		await writeQuoteAtomic(id, updated);
 
-		return { accepted: true, alreadyApproved: false };
+		const statusToken = signQuoteToken(id);
+		return {
+			accepted: true,
+			alreadyApproved: false,
+			status: 'approved',
+			statusLabel: quoteStatusLabel('approved'),
+			acceptedAt: now,
+			statusUrl: `/q/${encodeURIComponent(id)}?t=${encodeURIComponent(statusToken)}`
+		};
 	}
 };

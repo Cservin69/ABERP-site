@@ -275,6 +275,63 @@ describe('POST /api/quotes/{id}/status — F3 state machine: rejected + invoiced
 	});
 });
 
+describe('POST /api/quotes/{id}/status — S398 processing way-station (Bug #3)', () => {
+	it('allows approved → processing (ABERP intake staged a draft, NOT invoiced)', async () => {
+		const { POST } = await loadHandler();
+		seedQuote(QUOTE_ID, 'approved');
+		const req = postReq(QUOTE_ID, { status: 'processing', notes: 'draft inv_123 created' });
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
+		const res = await POST({ params: { id: QUOTE_ID }, request: req } as any);
+		expect(res.status).toBe(200);
+		const after = readSeeded(QUOTE_ID);
+		expect(after.status).toBe('processing');
+		const history = after.status_history as { from: string; to: string }[];
+		expect(history.at(-1)).toMatchObject({ from: 'approved', to: 'processing' });
+	});
+
+	it('allows processing → invoiced (real invoice issuance follows the way-station)', async () => {
+		const { POST } = await loadHandler();
+		seedQuote(QUOTE_ID, 'processing');
+		const req = postReq(QUOTE_ID, { status: 'invoiced', notes: 'DEAL-9 closed' });
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
+		const res = await POST({ params: { id: QUOTE_ID }, request: req } as any);
+		expect(res.status).toBe(200);
+		expect(readSeeded(QUOTE_ID).status).toBe('invoiced');
+	});
+
+	it('allows processing → rejected (processing is NOT terminal)', async () => {
+		const { POST } = await loadHandler();
+		seedQuote(QUOTE_ID, 'processing');
+		const req = postReq(QUOTE_ID, { status: 'rejected' });
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
+		const res = await POST({ params: { id: QUOTE_ID }, request: req } as any);
+		expect(res.status).toBe(200);
+		expect(readSeeded(QUOTE_ID).status).toBe('rejected');
+	});
+
+	it('allows processing → processing as an idempotent no-op (ABERP retry)', async () => {
+		const { POST } = await loadHandler();
+		seedQuote(QUOTE_ID, 'processing');
+		const req = postReq(QUOTE_ID, { status: 'processing' });
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
+		const res = await POST({ params: { id: QUOTE_ID }, request: req } as any);
+		expect(res.status).toBe(200);
+		const after = readSeeded(QUOTE_ID);
+		expect(after.status).toBe('processing');
+		expect(after.status_history).toBeUndefined();
+	});
+
+	it('refuses quoted → processing with 409 (only approved → processing is legal)', async () => {
+		const { POST } = await loadHandler();
+		seedQuote(QUOTE_ID, 'quoted');
+		const req = postReq(QUOTE_ID, { status: 'processing' });
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal stub
+		const res = await POST({ params: { id: QUOTE_ID }, request: req } as any);
+		expect(res.status).toBe(409);
+		expect(readSeeded(QUOTE_ID).status).toBe('quoted');
+	});
+});
+
 describe('POST /api/quotes/{id}/status — received is initial-only', () => {
 	it('refuses quoting → received with 409 (received is the initial state only)', async () => {
 		const { POST } = await loadHandler();
