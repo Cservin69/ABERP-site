@@ -273,6 +273,8 @@ export function buildPricedReadyEmail(q: QuoteMetadata, acceptUrl: string): Quot
 		'',
 		'The link is valid for 30 days. If you do not accept by then, please reply to this email and we will re-issue.',
 		'',
+		'Prices are quoted EXW (Ex Works, Incoterms 2020), Hungary — the price covers the manufactured part(s), made available and packed at our facility, ready for collection. Loading, transport, insurance, export/import clearance, customs duties and any taxes beyond Hungarian VAT are the buyer’s responsibility.',
+		'',
 		'— The Áben Consulting team'
 	]
 		.filter((l) => l !== '')
@@ -285,6 +287,7 @@ export function buildPricedReadyEmail(q: QuoteMetadata, acceptUrl: string): Quot
 			: '',
 		`<p style="font:14px system-ui,sans-serif;margin:24px 0"><a href="${escapeHtml(acceptUrl)}" style="display:inline-block;padding:12px 24px;background:#d4a574;color:#0f1320;border-radius:2px;text-decoration:none;font-weight:600">Accept this quote →</a></p>`,
 		'<p style="font:12px system-ui,sans-serif;color:#666">The accept link is valid for 30 days. After that, reply to this email and we will re-issue.</p>',
+		'<p style="font:12px system-ui,sans-serif;color:#666">Prices are quoted <strong>EXW (Ex Works, Incoterms 2020), Hungary</strong> — the price covers the manufactured part(s), made available and packed at our facility, ready for collection. Loading, transport, insurance, export/import clearance, customs duties and any taxes beyond Hungarian VAT are the buyer’s responsibility.</p>',
 		'<p style="font:14px system-ui,sans-serif;color:#666">— The Áben Consulting team</p>'
 	]
 		.filter((l) => l !== '')

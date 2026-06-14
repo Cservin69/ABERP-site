@@ -102,6 +102,13 @@
 					A PDF a megrendelő által megadott e-mailre is el lett küldve. / The PDF was also emailed
 					to the contact address.
 				</p>
+				<p class="hint incoterm">
+					Az árak EXW (gyári átvétel, Incoterms® 2020), Magyarország paritáson értendők — az ár a
+					legyártott alkatrész(eke)t tartalmazza, üzemünkben átvételre készen; a szállítás, a vám és
+					a magyar áfán felüli adók a vevőt terhelik. / Prices are quoted EXW (Ex Works, Incoterms®
+					2020), Hungary — the price covers the manufactured part(s), ready for collection at our
+					facility; transport, customs and any taxes beyond Hungarian VAT are the buyer's.
+				</p>
 			</section>
 		{:else if data.quote.pricingPending}
 			<section class="block pending">
