@@ -2,6 +2,8 @@
 	import { onMount } from 'svelte';
 	import { resolve } from '$app/paths';
 	import Wordmark from '$lib/brand/Wordmark.svelte';
+	import MaterialCombobox from '$lib/components/MaterialCombobox.svelte';
+	import { buildMaterialOptions } from '$lib/material-options';
 
 	const ACCEPT_EXT = '.step,.stp,.iges,.igs,.stl,.x_t,.x_b,.sldprt,.ipt,.f3d,.dxf,.dwg,.3mf,.obj';
 	const MAX_FILES = 10;
@@ -24,6 +26,10 @@
 	// visible so the form never becomes unusable ([[trust-code-not-operator]]).
 	let catalogueMaterials = $state<CatalogueMaterial[]>([]);
 	let catalogueLoaded = $state(false);
+	// Full alphabetically sorted option list feeding the typeahead combobox:
+	// `unknown` + (live catalogue grades OR fallback) + `other`. Rebuilds when the
+	// catalogue arrives at hydration.
+	const materialOptions = $derived(buildMaterialOptions(catalogueMaterials));
 
 	onMount(async () => {
 		try {
@@ -304,21 +310,12 @@
 				<div class="row">
 					<div class="field">
 						<label for="material">Material <span class="opt">(optional)</span></label>
-						<select id="material" name="material" bind:value={material}>
-							<option value="unknown">Not sure / ask us</option>
-							{#if catalogueMaterials.length > 0}
-								{#each catalogueMaterials as m (m.grade)}
-									<option value={m.grade}>{m.display_name}</option>
-								{/each}
-							{:else}
-								<option value="aluminum">Aluminum</option>
-								<option value="steel">Steel</option>
-								<option value="stainless">Stainless steel</option>
-								<option value="brass">Brass</option>
-								<option value="plastic">Plastic</option>
-							{/if}
-							<option value="other">Other (note below)</option>
-						</select>
+						<MaterialCombobox
+							id="material"
+							name="material"
+							options={materialOptions}
+							bind:value={material}
+						/>
 						{#if catalogueLoaded && catalogueMaterials.length === 0}
 							<p class="catalogue-note">
 								List may be limited until our shop sync runs — pick the closest match or
@@ -481,7 +478,6 @@
 	input[type='number'],
 	input[type='date'],
 	input[type='file'],
-	select,
 	textarea {
 		width: 100%;
 		box-sizing: border-box;
@@ -498,7 +494,6 @@
 	}
 
 	input:focus-visible,
-	select:focus-visible,
 	textarea:focus-visible {
 		border-color: #d4a574;
 		outline: none;
