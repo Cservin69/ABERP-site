@@ -77,6 +77,27 @@
 			</dl>
 		</section>
 
+		{#if data.quote.status === 'rejected'}
+			<section class="block refused" role="alert" data-testid="quote-refused">
+				<p>
+					<strong>Visszautasítva / Refused</strong> — sajnálattal értesítjük, hogy ezt a megrendelést
+					nem tudjuk teljesíteni.
+				</p>
+				<p class="en">We are sorry to inform you that we are unable to fulfil this order.</p>
+				{#if data.quote.refusalReason}
+					<p class="refused-reason" data-testid="quote-refused-reason">
+						<span class="refused-reason__label">Indok / Reason:</span>
+						{data.quote.refusalReason}
+					</p>
+				{/if}
+				<p class="refused-contact en">
+					Kérdése van? / Questions? <a href="mailto:confirmation@abenerp.com"
+						>confirmation@abenerp.com</a
+					>
+				</p>
+			</section>
+		{/if}
+
 		{#if data.quote.pricing?.stock_alert}
 			<section class="block stock-alert" role="alert">
 				<p>
@@ -359,6 +380,54 @@
 	.chip.status-invoiced {
 		background: rgba(170, 124, 196, 0.18);
 		color: #c9a8e0;
+	}
+
+	/* S403 — operator refusal panel. Reuses the same storefront red
+	   (#c66a6a) as the stock-alert so the customer reads "this did not go
+	   through" immediately. The reason text is rendered verbatim (already
+	   defensively truncated server-side). */
+	.refused {
+		border-color: rgba(198, 106, 106, 0.55);
+		background: rgba(198, 106, 106, 0.08);
+	}
+
+	.refused p {
+		margin: 0 0 0.45rem;
+		font-size: 0.95rem;
+		line-height: 1.5;
+		color: #e8a8a8;
+	}
+
+	.refused strong {
+		color: #f0c4c4;
+	}
+
+	.refused-reason {
+		margin-top: 0.6rem !important;
+		padding: 0.6rem 0.75rem;
+		background: rgba(0, 0, 0, 0.2);
+		border-left: 2px solid rgba(198, 106, 106, 0.55);
+		color: #f3eee5 !important;
+		font-size: 0.9rem !important;
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+	}
+
+	.refused-reason__label {
+		display: block;
+		font-size: 0.72rem;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		color: rgba(243, 238, 229, 0.55);
+		margin-bottom: 0.2rem;
+	}
+
+	.refused-contact {
+		margin-bottom: 0 !important;
+	}
+
+	.refused-contact a {
+		color: #d4a574;
 	}
 
 	/* Addendum-2 "BIG/RED" stock-alert (S285 F9). Reuses the same red
