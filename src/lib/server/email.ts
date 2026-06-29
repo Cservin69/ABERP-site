@@ -5,6 +5,7 @@ import type { QuoteMetadata } from './quote-store';
 import { pricedPdfPath } from './quote-store';
 import { defaultAcceptExpiryIso, signAcceptToken, signQuoteToken } from './quote-token';
 import { publicSiteUrl } from './public-url';
+import { toleranceLabel } from '$lib/tolerance';
 
 /**
  * Transactional email for quote notifications. SERVER-ONLY.
@@ -155,10 +156,15 @@ function summaryLines(q: QuoteMetadata): string[] {
 		`Email: ${q.contact.email}`,
 		q.contact.company ? `Company: ${q.contact.company}` : null,
 		`Material: ${q.request.material_preference}`,
+		`Tolerance: ${toleranceLabel(q.request.tolerance)}`,
+		q.request.tolerance === 'per_drawing' || q.request.tolerance_critical
+			? 'Tolerance review: MANUAL REVIEW (per-drawing and/or critical features flagged)'
+			: null,
 		q.request.quantity !== null ? `Quantity: ${q.request.quantity}` : null,
 		q.request.deadline ? `Deadline: ${q.request.deadline}` : null,
 		`Files: ${q.files.length}`,
-		q.request.notes ? `Notes: ${q.request.notes}` : null
+		q.request.notes ? `Notes: ${q.request.notes}` : null,
+		q.request.tolerance_note ? `Tolerance note: ${q.request.tolerance_note}` : null
 	];
 	return lines.filter((l): l is string => l !== null);
 }

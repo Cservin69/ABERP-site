@@ -88,6 +88,24 @@ export interface QuoteMetadata {
 		quantity: number | null;
 		deadline: string | null;
 		notes: string;
+		/**
+		 * Customer tolerance selection (ADR-0097 Q6). Closed vocabulary:
+		 * `general` (ISO 2768-m, default) | `precision` (ISO 2768-f) | `per_drawing`
+		 * (high precision → operator manual review). Optional for back-compat: rows
+		 * written before this field shipped have it absent; readers treat absent as
+		 * `general`. The Defense quote-intake maps it onto the engine `ToleranceSpec`
+		 * (see docs/contracts/quote-tolerance.md). Stored as a plain string (like
+		 * `material_preference`) to avoid coupling the store to the vocab module.
+		 */
+		tolerance?: string;
+		/** Customer flagged that some features need tighter tolerance → operator review. */
+		tolerance_critical?: boolean;
+		/**
+		 * Descriptive-only free text about critical features. Surfaced to the operator;
+		 * NEVER parsed into pricing (ADR-0097: the engine prices on the resolved band +
+		 * the per-feature callouts the operator sets, not on this string).
+		 */
+		tolerance_note?: string;
 	};
 	files: QuoteFileEntry[];
 	status: string;

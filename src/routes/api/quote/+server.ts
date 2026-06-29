@@ -8,6 +8,8 @@ import { sendSubmissionReceivedEmail } from '$lib/server/email';
 import { validateCadFile } from '$lib/server/cad-validate';
 import { assertSameOrigin } from '$lib/server/origin-check';
 import { currentCatalogueGrades } from '$lib/server/catalogue-store';
+import { TOLERANCE_DEFAULT, TOLERANCE_NOTE_MAX } from '$lib/tolerance';
+import { validateTolerance } from '$lib/server/tolerance-validate';
 
 const QUOTE_DIR = process.env.ABERP_SITE_QUOTE_DIR ?? './data/quotes';
 const MAX_TOTAL_BYTES = 50 * 1024 * 1024;
@@ -97,6 +99,12 @@ export const POST: RequestHandler = async ({ request }) => {
 	const deadline = getField(form, 'deadline') ?? '';
 	const notes = getField(form, 'notes') ?? '';
 	const consent = getField(form, 'consent');
+	// Tolerance (ADR-0097 Q6): a closed-vocabulary token from a guided dropdown,
+	// an optional "critical features?" flag, and an optional descriptive note that
+	// is surfaced to the operator but never parsed into pricing.
+	const toleranceRaw = getField(form, 'tolerance');
+	const toleranceCritical = getField(form, 'tolerance_critical') === 'true';
+	const toleranceNote = getField(form, 'tolerance_note') ?? '';
 
 	if (!name || name.trim().length === 0) return bad('Name is required.');
 	if (!email || email.trim().length === 0) return bad('Email is required.');
@@ -106,11 +114,13 @@ export const POST: RequestHandler = async ({ request }) => {
 	const emailTrim = email.trim();
 	const companyTrim = company.trim();
 	const notesTrim = notes.trim();
+	const toleranceNoteTrim = toleranceNote.trim();
 
 	if (nameTrim.length > 200) return bad('Name too long.');
 	if (emailTrim.length > 254) return bad('Email too long.');
 	if (companyTrim.length > 200) return bad('Company name too long.');
 	if (notesTrim.length > NOTES_MAX) return bad('Notes too long.');
+	if (toleranceNoteTrim.length > TOLERANCE_NOTE_MAX) return bad('Tolerance note too long.');
 
 	for (const [label, v] of [
 		['name', nameTrim],
@@ -118,7 +128,8 @@ export const POST: RequestHandler = async ({ request }) => {
 		['company', companyTrim],
 		['material', material],
 		['deadline', deadline],
-		['notes', notesTrim]
+		['notes', notesTrim],
+		['tolerance note', toleranceNoteTrim]
 	] as const) {
 		if (v.length > MAX_FIELD_LEN) return bad(`${label} too long.`);
 		if (HEADER_INJECTION_RE.test(v)) return bad(`${label} contains invalid characters.`);
@@ -133,6 +144,19 @@ export const POST: RequestHandler = async ({ request }) => {
 	if (!LEGACY_MATERIAL_PREFERENCES.has(material)) {
 		const grades = await currentCatalogueGrades();
 		if (!grades.has(material)) return bad('Invalid material selection.');
+	}
+
+	// Tolerance scheme validation (ADR-0097 Q6). The storefront only ever emits a
+	// closed-vocabulary token via a guided dropdown; this is the [[hulye-biztos]]
+	// backstop so a crafted or replayed POST cannot smuggle a free-form tolerance
+	// into the pipeline. Absent or empty ⇒ default `general` — inert/back-compat
+	// with pre-tolerance submissions. A failure mirrors the structured
+	// `invalid_file` 400 shape (machine-readable `error` + a descriptive reason).
+	const toleranceTrim = (toleranceRaw ?? '').trim();
+	const tolerance = toleranceTrim.length === 0 ? TOLERANCE_DEFAULT : toleranceTrim;
+	const toleranceResult = validateTolerance(tolerance);
+	if (!toleranceResult.valid) {
+		return json({ error: 'invalid_tolerance', reason: toleranceResult.reason }, { status: 400 });
 	}
 
 	let quantity: number | null = null;
@@ -223,7 +247,10 @@ export const POST: RequestHandler = async ({ request }) => {
 			material_preference: material,
 			quantity,
 			deadline: deadline || null,
-			notes: notesTrim
+			notes: notesTrim,
+			tolerance,
+			tolerance_critical: toleranceCritical,
+			tolerance_note: toleranceNoteTrim
 		},
 		files: storedFiles,
 		status: 'received',
