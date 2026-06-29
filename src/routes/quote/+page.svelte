@@ -4,6 +4,13 @@
 	import Wordmark from '$lib/brand/Wordmark.svelte';
 	import MaterialCombobox from '$lib/components/MaterialCombobox.svelte';
 	import { buildMaterialOptions } from '$lib/material-options';
+	import {
+		TOLERANCE_OPTIONS,
+		TOLERANCE_NOTE_MAX,
+		TOLERANCE_DEFAULT,
+		requiresManualReview,
+		type ToleranceScheme
+	} from '$lib/tolerance';
 
 	const ACCEPT_EXT = '.step,.stp,.iges,.igs,.stl,.x_t,.x_b,.sldprt,.ipt,.f3d,.dxf,.dwg,.3mf,.obj';
 	const MAX_FILES = 10;
@@ -48,6 +55,9 @@
 	let quantity = $state<number | null>(null);
 	let deadline = $state('');
 	let notes = $state('');
+	let tolerance = $state<ToleranceScheme>(TOLERANCE_DEFAULT);
+	let toleranceCritical = $state(false);
+	let toleranceNote = $state('');
 	let consent = $state(false);
 	let files = $state<File[]>([]);
 	let honeypot = $state('');
@@ -111,6 +121,9 @@
 		}
 		if (deadline) body.append('deadline', deadline);
 		if (notes.trim()) body.append('notes', notes.trim());
+		body.append('tolerance', tolerance);
+		if (toleranceCritical) body.append('tolerance_critical', 'true');
+		if (toleranceNote.trim()) body.append('tolerance_note', toleranceNote.trim());
 		body.append('consent', 'true');
 		if (honeypot) body.append('website', honeypot);
 		for (const f of files) body.append('files', f);
@@ -120,6 +133,7 @@
 			const data = (await res.json()) as {
 				id?: string;
 				error?: string;
+				reason?: string;
 				files?: { filename: string; reason: string }[];
 			};
 			if (data.error === 'invalid_file' && data.files && data.files.length > 0) {
@@ -130,6 +144,14 @@
 				const rejectedNames = new Set(data.files.map((f) => f.filename));
 				rejectedFiles = data.files;
 				files = files.filter((f) => !rejectedNames.has(f.name));
+				submitting = false;
+				return;
+			}
+			if (data.error === 'invalid_tolerance') {
+				// Defense-in-depth: the dropdown can only emit valid values, so a
+				// customer never reaches this — but if a crafted POST does, show the
+				// server's descriptive reason rather than the bare machine code.
+				errorMessage = data.reason ?? 'Please choose a valid tolerance option.';
 				submitting = false;
 				return;
 			}
@@ -344,6 +366,58 @@
 				</div>
 
 				<div class="field">
+					<label for="tolerance">
+						Tolerance <span class="opt">(optional)</span>
+						<span class="hint">
+							How tight do the dimensions need to be? If you're not sure, &ldquo;General&rdquo;
+							suits most parts. Tighter tolerances can affect price and lead time.
+						</span>
+					</label>
+					<select id="tolerance" name="tolerance" bind:value={tolerance}>
+						{#each TOLERANCE_OPTIONS as opt (opt.value)}
+							<option value={opt.value}>{opt.label}</option>
+						{/each}
+					</select>
+					{#if requiresManualReview(tolerance)}
+						<p class="catalogue-note">
+							We'll read the tolerances from your drawing and an engineer will review them by hand.
+						</p>
+					{/if}
+				</div>
+
+				<div class="field consent tolerance-critical">
+					<label>
+						<input
+							type="checkbox"
+							name="tolerance_critical"
+							value="true"
+							bind:checked={toleranceCritical}
+						/>
+						Any critical features needing tighter tolerance?
+					</label>
+				</div>
+
+				<div class="field">
+					<label for="tolerance_note">
+						Critical-feature notes
+						<span class="opt">(optional, max {TOLERANCE_NOTE_MAX} chars)</span>
+						<span class="hint">
+							Describe any features that need special attention (for example &ldquo;bore Ø12
+							H7&rdquo; or &ldquo;flatness on the top face&rdquo;). An engineer reads this &mdash;
+							it doesn't change the automated price.
+						</span>
+					</label>
+					<textarea
+						id="tolerance_note"
+						name="tolerance_note"
+						rows="2"
+						maxlength={TOLERANCE_NOTE_MAX}
+						bind:value={toleranceNote}
+					></textarea>
+					<p class="counter">{toleranceNote.length} / {TOLERANCE_NOTE_MAX}</p>
+				</div>
+
+				<div class="field">
 					<label for="notes">
 						Notes <span class="opt">(optional, max {NOTES_MAX} chars)</span>
 					</label>
@@ -478,6 +552,7 @@
 	input[type='number'],
 	input[type='date'],
 	input[type='file'],
+	select,
 	textarea {
 		width: 100%;
 		box-sizing: border-box;
@@ -494,6 +569,7 @@
 	}
 
 	input:focus-visible,
+	select:focus-visible,
 	textarea:focus-visible {
 		border-color: #d4a574;
 		outline: none;
@@ -502,6 +578,13 @@
 
 	input.invalid {
 		border-color: #c66a6a;
+	}
+
+	select {
+		/* Dark-theme the native control + its option popup so the closed set is
+		   readable on the dark form (no white-on-white options). */
+		color-scheme: dark;
+		cursor: pointer;
 	}
 
 	textarea {

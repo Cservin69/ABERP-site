@@ -215,3 +215,122 @@ describe('/api/quote content-sniffing integration', () => {
 		expect(res.status).toBe(200);
 	});
 });
+
+describe('/api/quote tolerance validation (ADR-0097 Q6)', () => {
+	function readMetadata(id: string): {
+		request: { tolerance?: string; tolerance_critical?: boolean; tolerance_note?: string };
+	} {
+		const raw = readFileSync(resolve(TMP_QUOTE_DIR, id, 'metadata.json'), 'utf8');
+		return JSON.parse(raw);
+	}
+
+	it('accepts a valid non-default tolerance (precision)', async () => {
+		const POST = await importHandler();
+		const form = baseForm();
+		form.append('tolerance', 'precision');
+		form.append('files', fileFromBuffer(read('valid.step'), 'part.step'));
+		const req = new Request('http://localhost/api/quote', { method: 'POST', body: form });
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal RequestEvent stub
+		const res = await POST({ request: req } as any);
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { id: string };
+		expect(readMetadata(body.id).request.tolerance).toBe('precision');
+	});
+
+	it('accepts per_drawing (the operator-manual-review scheme)', async () => {
+		const POST = await importHandler();
+		const form = baseForm();
+		form.append('tolerance', 'per_drawing');
+		form.append('files', fileFromBuffer(read('valid.step'), 'part.step'));
+		const req = new Request('http://localhost/api/quote', { method: 'POST', body: form });
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal RequestEvent stub
+		const res = await POST({ request: req } as any);
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { id: string };
+		expect(readMetadata(body.id).request.tolerance).toBe('per_drawing');
+	});
+
+	it('defaults to general when tolerance is absent (back-compat)', async () => {
+		const POST = await importHandler();
+		const form = baseForm();
+		form.append('files', fileFromBuffer(read('valid.step'), 'part.step'));
+		const req = new Request('http://localhost/api/quote', { method: 'POST', body: form });
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal RequestEvent stub
+		const res = await POST({ request: req } as any);
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { id: string };
+		expect(readMetadata(body.id).request.tolerance).toBe('general');
+	});
+
+	it('treats an empty-string tolerance as the default (not a rejection)', async () => {
+		const POST = await importHandler();
+		const form = baseForm();
+		form.set('tolerance', '');
+		form.append('files', fileFromBuffer(read('valid.step'), 'part.step'));
+		const req = new Request('http://localhost/api/quote', { method: 'POST', body: form });
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal RequestEvent stub
+		const res = await POST({ request: req } as any);
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { id: string };
+		expect(readMetadata(body.id).request.tolerance).toBe('general');
+	});
+
+	it('rejects an out-of-vocabulary tolerance with a structured invalid_tolerance 400', async () => {
+		const POST = await importHandler();
+		const form = baseForm();
+		form.set('tolerance', 'IT7');
+		form.append('files', fileFromBuffer(read('valid.step'), 'part.step'));
+		const req = new Request('http://localhost/api/quote', { method: 'POST', body: form });
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal RequestEvent stub
+		const res = await POST({ request: req } as any);
+		expect(res.status).toBe(400);
+		const body = (await res.json()) as { error: string; reason?: string };
+		expect(body.error).toBe('invalid_tolerance');
+		expect(body.reason).toMatch(/general, precision, per_drawing/);
+		expect(body.reason).toMatch(/IT7/);
+	});
+
+	it('rejects a malformed (free-form ±) tolerance', async () => {
+		const POST = await importHandler();
+		const form = baseForm();
+		form.set('tolerance', '+/-0.01 mm');
+		form.append('files', fileFromBuffer(read('valid.step'), 'part.step'));
+		const req = new Request('http://localhost/api/quote', { method: 'POST', body: form });
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal RequestEvent stub
+		const res = await POST({ request: req } as any);
+		expect(res.status).toBe(400);
+		const body = (await res.json()) as { error: string };
+		expect(body.error).toBe('invalid_tolerance');
+	});
+
+	it('persists the critical-features flag and the descriptive note', async () => {
+		const POST = await importHandler();
+		const form = baseForm();
+		form.append('tolerance', 'precision');
+		form.append('tolerance_critical', 'true');
+		form.append('tolerance_note', 'bore Ø12 H7; flatness on the top face');
+		form.append('files', fileFromBuffer(read('valid.step'), 'part.step'));
+		const req = new Request('http://localhost/api/quote', { method: 'POST', body: form });
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal RequestEvent stub
+		const res = await POST({ request: req } as any);
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { id: string };
+		const md = readMetadata(body.id);
+		expect(md.request.tolerance_critical).toBe(true);
+		expect(md.request.tolerance_note).toBe('bore Ø12 H7; flatness on the top face');
+	});
+
+	it('rejects an overlong tolerance note', async () => {
+		const POST = await importHandler();
+		const form = baseForm();
+		form.append('tolerance', 'general');
+		form.append('tolerance_note', 'x'.repeat(501));
+		form.append('files', fileFromBuffer(read('valid.step'), 'part.step'));
+		const req = new Request('http://localhost/api/quote', { method: 'POST', body: form });
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal RequestEvent stub
+		const res = await POST({ request: req } as any);
+		expect(res.status).toBe(400);
+		const body = (await res.json()) as { error: string };
+		expect(body.error).toMatch(/note too long/i);
+	});
+});

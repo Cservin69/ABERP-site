@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import { toleranceLabel } from '$lib/tolerance';
 
 	let { data, form } = $props();
 
@@ -67,6 +68,17 @@
 			<dd>{data.quote.request.deadline ?? '—'}</dd>
 			<dt>Notes</dt>
 			<dd class="notes">{data.quote.request.notes || '—'}</dd>
+			<dt>Tolerance</dt>
+			<dd>
+				{toleranceLabel(data.quote.request.tolerance)}
+				{#if (data.quote.request.tolerance ?? 'general') === 'per_drawing' || data.quote.request.tolerance_critical}
+					<strong class="review-flag">— needs manual review</strong>
+				{/if}
+			</dd>
+			{#if data.quote.request.tolerance_note}
+				<dt>Tolerance note</dt>
+				<dd class="notes">{data.quote.request.tolerance_note}</dd>
+			{/if}
 		</dl>
 	</section>
 
