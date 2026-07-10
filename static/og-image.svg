@@ -1,9 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
   <title>ABENERP — Your CAD. Your part. Made.</title>
   <defs>
+    <!-- Wordmark + accent-bar ramp retuned to the mark's own sampled facets
+         (matches src/lib/brand/Wordmark.svelte's abenerp-gold), replacing the
+         orange f2cb6e->c2862b so this share card's ABENERP reads as one lockup
+         with the mark above it. Both consumers here (the wordmark text and the
+         bottom trim bar) are brand elements — no semantic state rides on this. -->
     <linearGradient id="gold" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#f2cb6e"/>
-      <stop offset="100%" stop-color="#c2862b"/>
+      <stop offset="0%" stop-color="#fffdcd"/>
+      <stop offset="22%" stop-color="#ebd48c"/>
+      <stop offset="48%" stop-color="#d7bf7b"/>
+      <stop offset="72%" stop-color="#ac8e51"/>
+      <stop offset="100%" stop-color="#866832"/>
     </linearGradient>
     <linearGradient id="bg" x1="0%" y1="0%" x2="0%" y2="100%">
       <stop offset="0%" stop-color="#0f1320"/>
