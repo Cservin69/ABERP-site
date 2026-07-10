@@ -487,7 +487,7 @@
 		color: #f3eee5;
 		background: rgba(255, 255, 255, 0.04);
 		border: 1px solid rgba(212, 165, 116, 0.35);
-		border-radius: 2px;
+		border-radius: var(--radius-sm);
 		transition:
 			border-color 160ms ease,
 			background-color 160ms ease;
@@ -536,7 +536,7 @@
 		padding: 0.4rem 0.6rem;
 		background: rgba(255, 255, 255, 0.03);
 		border: 1px solid rgba(212, 165, 116, 0.2);
-		border-radius: 2px;
+		border-radius: var(--radius-sm);
 		font-size: 0.85rem;
 	}
 
@@ -560,7 +560,7 @@
 		color: #d4a574;
 		width: 1.6rem;
 		height: 1.6rem;
-		border-radius: 50%;
+		border-radius: var(--radius-full);
 		cursor: pointer;
 		font-size: 1rem;
 		line-height: 1;
@@ -730,7 +730,7 @@
 		display: inline-block;
 		padding: 0.15rem 0.5rem;
 		background: rgba(0, 0, 0, 0.3);
-		border-radius: 2px;
+		border-radius: var(--radius-sm);
 		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 		font-size: 0.9rem;
 		color: #f3eee5;

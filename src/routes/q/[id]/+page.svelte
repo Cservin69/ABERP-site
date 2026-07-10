@@ -237,7 +237,7 @@
 		padding: 1.1rem 1.25rem;
 		border: 1px solid rgba(212, 165, 116, 0.18);
 		background: rgba(255, 255, 255, 0.02);
-		border-radius: 2px;
+		border-radius: var(--radius-sm);
 		margin-bottom: 1.25rem;
 	}
 
@@ -331,7 +331,7 @@
 		display: inline-flex;
 		align-items: center;
 		padding: 0.4rem 0.95rem;
-		border-radius: 999px;
+		border-radius: var(--radius-pill);
 		font-size: 0.85rem;
 		letter-spacing: 0.04em;
 	}
@@ -395,7 +395,7 @@
 		display: inline-block;
 		padding: 0.55rem 0.95rem;
 		border: 1px solid rgba(212, 165, 116, 0.55);
-		border-radius: 2px;
+		border-radius: var(--radius-sm);
 		color: #f3eee5;
 		text-decoration: none;
 		font-size: 0.95rem;

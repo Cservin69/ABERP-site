@@ -27,9 +27,37 @@
 	</defs>
 
 	{#if showMonogram}
-		<text class="monogram" x="400" y="68" text-anchor="middle" fill="url(#abenerp-gold)">
-			A —
-		</text>
+		<!--
+		  Áben mark — compact geometric A, ported verbatim from
+		  Cservin69/ABERP-Editions main b5c8f5f (static/favicon.svg). Embedded as
+		  a nested <svg> so its "10 8 204 204" coordinate system stays intact and
+		  the mark drops, centred, into the ~42px slot the old hand-drawn "A —"
+		  text monogram held — same footprint, no transform math. The swoosh
+		  variant lives in static/brand-mark.svg; the header uses the compact A
+		  so it centres cleanly above the ABENERP wordmark. Gold stops are the
+		  editions --color-brand-gold-* hexes.
+		-->
+		<svg
+			class="mark"
+			x="372"
+			y="14"
+			width="56"
+			height="56"
+			viewBox="10 8 204 204"
+			role="img"
+			aria-label="ABENERP mark"
+		>
+			<defs>
+				<linearGradient id="abenGold" x1="0" y1="0" x2="0.35" y2="1">
+					<stop offset="0" stop-color="#F6E7B4" />
+					<stop offset="0.45" stop-color="#D9B451" />
+					<stop offset="1" stop-color="#9C7A2A" />
+				</linearGradient>
+			</defs>
+			<path fill="url(#abenGold)" d="M105,24 L112,66 L66,196 L28,196 Z" />
+			<path fill="url(#abenGold)" d="M119,24 L196,196 L158,196 L112,66 Z" />
+			<path fill="url(#abenGold)" d="M82,150 L112,134 L142,150 L142,166 L112,150 L82,166 Z" />
+		</svg>
 		<text class="lettering" x="400" y="180" text-anchor="middle" fill="url(#abenerp-gold)">
 			ABENERP
 		</text>
@@ -67,23 +95,5 @@
 		stroke-width: 6px;
 		stroke-linejoin: round;
 		paint-order: stroke fill;
-	}
-
-	.monogram {
-		font-family:
-			system-ui,
-			-apple-system,
-			'Segoe UI',
-			Roboto,
-			sans-serif;
-		/* Bumped to match the heavier lettering so the accent stays balanced. */
-		font-weight: 800;
-		font-size: 42px;
-		letter-spacing: 6px;
-		stroke: url(#abenerp-gold);
-		stroke-width: 2.5px;
-		stroke-linejoin: round;
-		paint-order: stroke fill;
-		opacity: 0.78;
 	}
 </style>

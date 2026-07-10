@@ -1,20 +1,18 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <title>ABENERP</title>
+<svg viewBox="10 8 204 204" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ABENERP">
+  <!-- Áben mark — compact (favicon) variant: the geometric A only, no
+       swoosh (the swoosh does not survive tab sizes). Same geometry as the
+       full brand-mark.svg so 16px and 512px read identically. Ported verbatim
+       from Cservin69/ABERP-Editions main b5c8f5f so both properties carry one
+       identical mark. Gold gradient hexes mirror --color-brand-gold-* in the
+       editions lib/tokens.css. -->
   <defs>
-    <linearGradient id="g" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#f2cb6e"/>
-      <stop offset="100%" stop-color="#c2862b"/>
+    <linearGradient id="abenGold" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#F6E7B4"/>
+      <stop offset="0.45" stop-color="#D9B451"/>
+      <stop offset="1" stop-color="#9C7A2A"/>
     </linearGradient>
   </defs>
-  <rect width="64" height="64" rx="10" fill="#0f1320"/>
-  <text
-    x="32"
-    y="46"
-    text-anchor="middle"
-    font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
-    font-weight="300"
-    font-size="40"
-    letter-spacing="1"
-    fill="url(#g)"
-  >A</text>
+  <path fill="url(#abenGold)" d="M105,24 L112,66 L66,196 L28,196 Z"/>
+  <path fill="url(#abenGold)" d="M119,24 L196,196 L158,196 L112,66 Z"/>
+  <path fill="url(#abenGold)" d="M82,150 L112,134 L142,150 L142,166 L112,150 L82,166 Z"/>
 </svg>

@@ -275,7 +275,7 @@
 		padding: 1.25rem 1.4rem;
 		border: 1px solid rgba(212, 165, 116, 0.18);
 		background: rgba(255, 255, 255, 0.02);
-		border-radius: 2px;
+		border-radius: var(--radius-sm);
 		margin-bottom: 1.25rem;
 	}
 
@@ -337,7 +337,7 @@
 		border: 1px solid rgba(198, 106, 106, 0.55);
 		background: rgba(198, 106, 106, 0.08);
 		color: #e8a8a8;
-		border-radius: 2px;
+		border-radius: var(--radius-sm);
 		font-size: 0.9rem;
 		line-height: 1.5;
 	}
@@ -360,7 +360,7 @@
 		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 		font-size: 1.05rem;
 		color: #f3eee5;
-		border-radius: 2px;
+		border-radius: var(--radius-sm);
 	}
 
 	/* RED border when empty, RED+shake-ish hint when filled but mismatched,
@@ -378,7 +378,7 @@
 		background: rgba(15, 19, 32, 0.9);
 		color: #f3eee5;
 		border: 3px solid #c66a6a;
-		border-radius: 2px;
+		border-radius: var(--radius-sm);
 		outline: none;
 		transition:
 			border-color 120ms ease-out,
@@ -414,7 +414,7 @@
 		background: rgba(212, 165, 116, 0.15);
 		color: rgba(243, 238, 229, 0.5);
 		border: 2px solid rgba(212, 165, 116, 0.35);
-		border-radius: 2px;
+		border-radius: var(--radius-sm);
 		cursor: not-allowed;
 		transition:
 			background 120ms ease-out,
@@ -475,7 +475,7 @@
 		display: inline-block;
 		padding: 0.55rem 0.95rem;
 		border: 1px solid rgba(212, 165, 116, 0.55);
-		border-radius: 2px;
+		border-radius: var(--radius-sm);
 		color: #f3eee5;
 		text-decoration: none;
 		font-size: 0.9rem;

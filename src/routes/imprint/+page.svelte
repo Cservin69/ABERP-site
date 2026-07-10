@@ -171,7 +171,7 @@
 	code {
 		background: rgba(212, 165, 116, 0.12);
 		padding: 0.1em 0.35em;
-		border-radius: 3px;
+		border-radius: var(--radius-sm);
 		font-size: 0.9em;
 	}
 

@@ -1,4 +1,8 @@
 <script lang="ts">
+	// Global design tokens (radius scale). Imported at the root layout so the
+	// `:root` custom properties cascade to every route's scoped styles.
+	import '$lib/tokens.css';
+
 	let { data, children } = $props();
 
 	const canonical = $derived(`${data.publicSiteUrl}/`);

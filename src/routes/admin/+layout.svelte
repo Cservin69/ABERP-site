@@ -88,7 +88,7 @@
 		border: 1px solid rgba(212, 165, 116, 0.4);
 		color: #d4a574;
 		padding: 0.35rem 0.75rem;
-		border-radius: 2px;
+		border-radius: var(--radius-sm);
 		font-family: inherit;
 		font-size: 0.8rem;
 		cursor: pointer;
