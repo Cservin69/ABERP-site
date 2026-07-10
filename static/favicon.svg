@@ -3,8 +3,8 @@
        swoosh (the swoosh does not survive tab sizes). Same geometry as the
        full brand-mark.svg so 16px and 512px read identically. Ported verbatim
        from Cservin69/ABERP-Editions main b5c8f5f so both properties carry one
-       identical mark. Gold gradient hexes mirror --color-brand-gold-* in the
-       editions lib/tokens.css. -->
+       identical mark. Gold gradient hexes mirror the color-brand-gold-* tokens
+       in the editions lib/tokens.css. -->
   <defs>
     <linearGradient id="abenGold" x1="0" y1="0" x2="0.35" y2="1">
       <stop offset="0" stop-color="#F6E7B4"/>

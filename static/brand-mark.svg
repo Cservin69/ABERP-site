@@ -4,8 +4,8 @@
        vector primitives (not an autotrace) so it stays crisp at any size.
        Ported verbatim from Cservin69/ABERP-Editions main b5c8f5f (the merged
        gold mark) so the storefront and the editions line carry one identical
-       A. Gold gradient hexes mirror --color-brand-gold-* in the editions
-       lib/tokens.css. -->
+       A. Gold gradient hexes mirror the color-brand-gold-* tokens in the
+       editions lib/tokens.css. -->
   <defs>
     <linearGradient id="abenGold" x1="0" y1="0" x2="0.35" y2="1">
       <stop offset="0" stop-color="#F6E7B4"/>

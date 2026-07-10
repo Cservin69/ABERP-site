@@ -35,7 +35,7 @@
 		  text monogram held — same footprint, no transform math. The swoosh
 		  variant lives in static/brand-mark.svg; the header uses the compact A
 		  so it centres cleanly above the ABENERP wordmark. Gold stops are the
-		  editions --color-brand-gold-* hexes.
+		  editions color-brand-gold-* token hexes.
 		-->
 		<svg
 			class="mark"
