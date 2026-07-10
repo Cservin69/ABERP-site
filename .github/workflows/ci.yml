@@ -26,10 +26,13 @@ jobs:
       # Strict XML validity for every tracked SVG. Browsers are lenient (they
       # accept `--` in a comment); expat/librsvg/resvg are not, so a favicon
       # that only renders in a browser is a liability for icon pipelines + SSR.
-      # Fails closed and self-tests its own detector each run. Runs before the
-      # node steps so it fails fast and needs no build.
-      - name: SVG well-formedness (strict XML, fail-closed + self-tested)
-        run: python3 scripts/check-svg-wellformed.py
+      # Same two-script shape as ABERP-Editions: the linter globs `git ls-files
+      # '*.svg'`, and the negative probe proves it goes RED on a malformed file
+      # and GREEN when removed. Runs before the node steps so it fails fast.
+      - name: SVG well-formedness (strict XML over every tracked *.svg)
+        run: bash tools/lint_svg_wellformed.sh
+      - name: SVG lint negative probe (prove the lint fails closed)
+        run: bash tools/lint_svg_negative_probe.sh
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
