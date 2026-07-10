@@ -1,0 +1,25 @@
+/* ── Radius (rounded-card surface language) ───────────────────────────────
+ * ONE scale, tokenised so no component hardcodes a corner. "Rounded card,
+ * not a box" — the storefront softens to these; ad-hoc px radii are a review
+ * block. Ported verbatim from Cservin69/ABERP-Editions main b5c8f5f
+ * (lib/tokens.css) so both properties share one radius language.
+ *   sm  → controls: inputs, buttons, badges, chips, small insets, code
+ *   md  → cards & panels: the dominant surface radius
+ *   lg  → large surfaces: modals, wizards, hero panels
+ *   pill→ fully-round tags/toggles (was the ad-hoc 999px)
+ *   full→ circles: status dots, avatars, icon buttons (was the ad-hoc 50%)
+ *
+ * Mapping applied in the sweep (identical to the editions mapping):
+ *   2px / 3px / 4px  → --radius-sm   (6px)
+ *   6px / 8px        → --radius-md   (10px)
+ *   12px             → --radius-lg   (14px)
+ *   999px            → --radius-pill (value preserved)
+ *   50%              → --radius-full (value preserved)
+ */
+:root {
+	--radius-sm: 6px;
+	--radius-md: 10px;
+	--radius-lg: 14px;
+	--radius-pill: 999px;
+	--radius-full: 50%;
+}

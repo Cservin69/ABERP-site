@@ -207,7 +207,7 @@
 		padding: 1.25rem;
 		border: 1px solid rgba(212, 165, 116, 0.18);
 		background: rgba(255, 255, 255, 0.02);
-		border-radius: 2px;
+		border-radius: var(--radius-sm);
 	}
 
 	.block.files,
@@ -342,7 +342,7 @@
 		color: #f3eee5;
 		background: rgba(255, 255, 255, 0.04);
 		border: 1px solid rgba(212, 165, 116, 0.35);
-		border-radius: 2px;
+		border-radius: var(--radius-sm);
 	}
 
 	textarea {
@@ -422,7 +422,7 @@
 		display: inline-flex;
 		align-items: center;
 		padding: 0.35rem 0.85rem;
-		border-radius: 999px;
+		border-radius: var(--radius-pill);
 		font-size: 0.85rem;
 		text-transform: lowercase;
 		letter-spacing: 0.05em;

@@ -1,0 +1,44 @@
+name: CI
+
+# PR / branch gate. deploy.yml only triggers on `push: main` (+ workflow_dispatch),
+# so pull requests previously ran no checks at all. This workflow runs the SAME
+# build gate deploy.yml runs inline (check → lint → test → build) but carries NO
+# AWS credentials, NO `environment: production`, and NO deploy steps — it can only
+# report green/red on the change, never ship it. The production deploy path in
+# deploy.yml is left entirely untouched and still sits behind its required-reviewer
+# environment gate.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches-ignore: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run check
+      - run: npm run lint
+      - name: Test
+        run: npm run test:unit -- --run
+        timeout-minutes: 5
+        env:
+          VITEST_HANG_DIAG: '1'
+      - run: npm run build
+      - name: Sanity-check build output
+        run: |
+          set -euo pipefail
+          test -d build/server  || { echo "build/server missing"; exit 1; }
+          test -d build/client  || { echo "build/client missing"; exit 1; }
+          test -f build/index.js || { echo "build/index.js missing"; exit 1; }

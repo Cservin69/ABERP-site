@@ -98,7 +98,7 @@
 		align-items: center;
 		gap: 0.3rem;
 		padding: 0.3rem 0.7rem;
-		border-radius: 999px;
+		border-radius: var(--radius-pill);
 		font-size: 0.78rem;
 		text-decoration: none;
 		text-transform: lowercase;
@@ -159,7 +159,7 @@
 	.table-wrap {
 		overflow-x: auto;
 		border: 1px solid rgba(212, 165, 116, 0.18);
-		border-radius: 2px;
+		border-radius: var(--radius-sm);
 	}
 
 	table {

@@ -198,7 +198,7 @@
 		color: #f3eee5;
 		background: rgba(255, 255, 255, 0.04);
 		border: 1px solid rgba(212, 165, 116, 0.35);
-		border-radius: 2px;
+		border-radius: var(--radius-sm);
 		transition:
 			border-color 160ms ease,
 			background-color 160ms ease;
@@ -227,7 +227,7 @@
 		overflow-y: auto;
 		background: #161b2c;
 		border: 1px solid rgba(212, 165, 116, 0.45);
-		border-radius: 2px;
+		border-radius: var(--radius-sm);
 		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 	}
 
@@ -235,7 +235,7 @@
 		padding: 0.55rem 0.6rem;
 		font-size: 0.9rem;
 		color: #f3eee5;
-		border-radius: 2px;
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 		/* Comfortable touch target on mobile. */
 		min-height: 1.1rem;

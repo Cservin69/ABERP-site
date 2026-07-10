@@ -83,7 +83,7 @@
 		color: #f3eee5;
 		background: rgba(255, 255, 255, 0.04);
 		border: 1px solid rgba(212, 165, 116, 0.35);
-		border-radius: 2px;
+		border-radius: var(--radius-sm);
 	}
 
 	input:focus-visible {
