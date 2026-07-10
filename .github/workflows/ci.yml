@@ -23,6 +23,13 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      # Strict XML validity for every tracked SVG. Browsers are lenient (they
+      # accept `--` in a comment); expat/librsvg/resvg are not, so a favicon
+      # that only renders in a browser is a liability for icon pipelines + SSR.
+      # Fails closed and self-tests its own detector each run. Runs before the
+      # node steps so it fails fast and needs no build.
+      - name: SVG well-formedness (strict XML, fail-closed + self-tested)
+        run: python3 scripts/check-svg-wellformed.py
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
