@@ -20,9 +20,20 @@
 >
 	<title id="abenerp-wordmark-title">ABENERP</title>
 	<defs>
+		<!--
+		  Wordmark ramp retuned to the mark's OWN pixel-sampled facet colours
+		  (the armL apex→foot spine plus the accent's light-gold) so ABENERP and
+		  the Áben mark above it read as one lockup. The previous flat
+		  f2cb6e→c2862b ramp bottomed out in orange (c2862b), clashing with the
+		  champagne-to-gold mark; every stop below is verbatim from the mark's
+		  sampled ramp — no eyeballed colour, and it never enters orange.
+		-->
 		<linearGradient id="abenerp-gold" x1="0%" y1="0%" x2="0%" y2="100%">
-			<stop offset="0%" stop-color="#f2cb6e" />
-			<stop offset="100%" stop-color="#c2862b" />
+			<stop offset="0%" stop-color="#fffdcd" />
+			<stop offset="22%" stop-color="#ebd48c" />
+			<stop offset="48%" stop-color="#d7bf7b" />
+			<stop offset="72%" stop-color="#ac8e51" />
+			<stop offset="100%" stop-color="#866832" />
 		</linearGradient>
 	</defs>
 

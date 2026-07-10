@@ -18,9 +18,7 @@
 
 	<div class="content">
 		<h1 class="wordmark-wrap"><Wordmark /></h1>
-		<p class="tagline">
-			<span class="tag-accent">A —</span> Your CAD. Your part. Made.
-		</p>
+		<p class="tagline">Your CAD. Your part. Made.</p>
 		<a class="cta" href={resolve('/quote')}>Get a quote</a>
 	</div>
 
@@ -75,11 +73,6 @@
 		letter-spacing: 0.05em;
 		margin: 0 0 2.5rem;
 		color: #f3eee5;
-	}
-
-	.tag-accent {
-		color: #d8a753;
-		margin-right: 0.35em;
 	}
 
 	.cta {
