@@ -18,7 +18,9 @@
 
 	<div class="content">
 		<h1 class="wordmark-wrap"><Wordmark /></h1>
-		<p class="tagline">Your CAD. Your part. Made.</p>
+		<p class="tagline">
+			<img class="tag-mark" src="/favicon.svg" alt="" aria-hidden="true" /> Your CAD. Your part. Made.
+		</p>
 		<a class="cta" href={resolve('/quote')}>Get a quote</a>
 	</div>
 
@@ -73,6 +75,21 @@
 		letter-spacing: 0.05em;
 		margin: 0 0 2.5rem;
 		color: #f3eee5;
+	}
+
+	.tag-mark {
+		/* The compact keep-accent Áben mark — the SAME artwork we ship as the
+		   favicon (static/favicon.svg), NOT the full brand mark. Beside 300-weight
+		   body text, and over the rain canvas + the tagline's text-shadow, the full
+		   mark's long thin accent sail goes sub-pixel and dies; the favicon variant
+		   clips that sail to a compact tick built to survive at icon size. Sized to
+		   the text's cap height (0.72em) and seated on the baseline so it matches
+		   the type's optical weight, not its bounding box — a mark set larger reads
+		   too heavy next to this thin weight. */
+		width: 0.72em;
+		height: 0.72em;
+		vertical-align: -0.1em;
+		margin-right: 0.38em;
 	}
 
 	.cta {
