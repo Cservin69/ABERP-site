@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Strict XML validity for every tracked SVG. Browsers are lenient (they
       # accept `--` in a comment); expat/librsvg/resvg are not, so a favicon
       # that only renders in a browser is a liability for icon pipelines + SSR.
