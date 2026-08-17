@@ -21,7 +21,6 @@ const ALLOWED_EXT = new Set([
 	'.stp',
 	'.iges',
 	'.igs',
-	'.stl',
 	'.x_t',
 	'.x_b',
 	'.sldprt',
@@ -32,6 +31,13 @@ const ALLOWED_EXT = new Set([
 	'.3mf',
 	'.obj'
 ]);
+// STEP-only decision: `.stl` was removed from ALLOWED_EXT above, but is still
+// routed past the flat allowlist gate so it reaches validateCadFile and comes
+// back as the structured `invalid_file` 400 the /quote SPA renders as a
+// per-file chip ("STL is no longer accepted — please upload STEP…"). Without
+// this, an STL upload would get the terse `File type not allowed` flat 400 with
+// no guidance. See STL_RETIRED_REASON in $lib/server/cad-validate.
+const RETIRED_EXT = new Set(['.stl']);
 // Legacy free-text preferences accepted forever, so any pre-PR-02 tab still
 // submits cleanly (the existing dropdown emits these values). Per ADR-0003,
 // the catalogue grade set is unioned on top at validation time.
@@ -175,7 +181,7 @@ export const POST: RequestHandler = async ({ request }) => {
 	let totalBytes = 0;
 	for (const f of fileEntries) {
 		const ext = extname(f.name).toLowerCase();
-		if (!ALLOWED_EXT.has(ext)) {
+		if (!ALLOWED_EXT.has(ext) && !RETIRED_EXT.has(ext)) {
 			return bad(`File type not allowed: ${f.name}`);
 		}
 		totalBytes += f.size;

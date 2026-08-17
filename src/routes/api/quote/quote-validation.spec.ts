@@ -88,7 +88,7 @@ describe('/api/quote content-sniffing integration', () => {
 		const POST = await importHandler();
 		const form = baseForm();
 		form.append('files', fileFromBuffer(read('valid.step'), 'good.step'));
-		form.append('files', fileFromBuffer(read('valid_ascii.stl'), 'cube.stl'));
+		form.append('files', fileFromBuffer(read('valid.iges'), 'good.iges'));
 		form.append('files', fileFromBuffer(read('not-cad.pdf'), 'taxi.step'));
 
 		const req = new Request('http://localhost/api/quote', { method: 'POST', body: form });
@@ -109,7 +109,7 @@ describe('/api/quote content-sniffing integration', () => {
 		const POST = await importHandler();
 		const form = baseForm();
 		form.append('files', fileFromBuffer(read('valid.step'), 'part.step'));
-		form.append('files', fileFromBuffer(read('valid_ascii.stl'), 'cube.stl'));
+		form.append('files', fileFromBuffer(read('valid.iges'), 'part.iges'));
 		form.append('files', fileFromBuffer(read('valid.dxf'), 'plate.dxf'));
 
 		const req = new Request('http://localhost/api/quote', { method: 'POST', body: form });
@@ -153,6 +153,79 @@ describe('/api/quote content-sniffing integration', () => {
 		// still get the flat "File type not allowed" error rather than the
 		// structured invalid_file shape.
 		expect(body.error).toMatch(/not allowed/);
+	});
+
+	describe('STL retirement (STEP-only pipeline)', () => {
+		async function post(files: { buf: Buffer; name: string }[]) {
+			const POST = await importHandler();
+			const form = baseForm();
+			for (const f of files) form.append('files', fileFromBuffer(f.buf, f.name));
+			const req = new Request('http://localhost/api/quote', { method: 'POST', body: form });
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal RequestEvent stub for this handler
+			return POST({ request: req } as any);
+		}
+
+		it('rejects a genuine .stl upload with the structured per-file chip', async () => {
+			const res = await post([{ buf: read('valid_ascii.stl'), name: 'cube.stl' }]);
+			expect(res.status).toBe(400);
+			const body = (await res.json()) as {
+				error: string;
+				files: { filename: string; reason: string }[];
+			};
+			// Not the flat `File type not allowed` — the SPA renders per-file chips
+			// off `invalid_file`, so the customer must be told to send STEP instead.
+			expect(body.error).toBe('invalid_file');
+			expect(body.files).toHaveLength(1);
+			expect(body.files[0].filename).toBe('cube.stl');
+			expect(body.files[0].reason).toMatch(/STL is no longer accepted/i);
+			expect(body.files[0].reason).toMatch(/\.step/);
+		});
+
+		it('rejects an ASCII STL renamed to .step via content-sniffing', async () => {
+			const res = await post([{ buf: read('valid_ascii.stl'), name: 'sneaky.step' }]);
+			expect(res.status).toBe(400);
+			const body = (await res.json()) as {
+				error: string;
+				files: { filename: string; reason: string }[];
+			};
+			expect(body.error).toBe('invalid_file');
+			expect(body.files[0].filename).toBe('sneaky.step');
+			expect(body.files[0].reason).toMatch(/STL is no longer accepted/i);
+		});
+
+		it('rejects a binary STL renamed to .stp via content-sniffing', async () => {
+			const res = await post([{ buf: read('valid_binary.stl'), name: 'sneaky.stp' }]);
+			expect(res.status).toBe(400);
+			const body = (await res.json()) as {
+				error: string;
+				files: { filename: string; reason: string }[];
+			};
+			expect(body.error).toBe('invalid_file');
+			expect(body.files[0].reason).toMatch(/STL is no longer accepted/i);
+		});
+
+		it('rejects the STL but reports every other bad file alongside it', async () => {
+			const res = await post([
+				{ buf: read('valid.step'), name: 'good.step' },
+				{ buf: read('valid_binary.stl'), name: 'cube.stl' },
+				{ buf: read('not-cad.pdf'), name: 'taxi.step' }
+			]);
+			expect(res.status).toBe(400);
+			const body = (await res.json()) as {
+				error: string;
+				files: { filename: string; reason: string }[];
+			};
+			expect(body.files.map((f) => f.filename)).toEqual(['cube.stl', 'taxi.step']);
+			expect(body.files[0].reason).toMatch(/STL is no longer accepted/i);
+			expect(body.files[1].reason).toMatch(/PDF/);
+		});
+
+		it('still accepts a STEP-only submission', async () => {
+			const res = await post([{ buf: read('valid.step'), name: 'part.step' }]);
+			expect(res.status).toBe(200);
+			const body = (await res.json()) as { id: string; status: string };
+			expect(body.status).toBe('received');
+		});
 	});
 
 	it('accepts a catalogue grade when present in the current snapshot (PR-02 widening)', async () => {

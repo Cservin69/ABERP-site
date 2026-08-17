@@ -123,43 +123,46 @@ export function validateIGES(buf: Buffer): ValidationResult {
 	return ok;
 }
 
-export function validateSTL(buf: Buffer): ValidationResult {
-	if (buf.length < 15) {
-		return fail(`STL file is too small (${buf.length} bytes) to contain even a single triangle.`);
-	}
-	const head = asciiPeek(buf, Math.min(512, buf.length)).trimStart();
-	const looksAscii = /^solid\b/i.test(head);
-	if (looksAscii) {
-		// ASCII STL: `solid <name>` ... `endsolid <name>`. We accept the file as
-		// ASCII iff `endsolid` appears in the buffer AND the leading prefix
-		// scans as mostly-printable. Some binary STLs start with the literal
-		// word `solid` but contain non-printable bytes shortly after — we
-		// catch that here and fall through to the binary check.
-		const sample = buf.subarray(0, Math.min(2048, buf.length));
-		if (isMostlyPrintable(sample)) {
-			const text = buf.toString('latin1');
-			if (/\bendsolid\b/i.test(text) || /\bfacet\s+normal\b/i.test(text)) {
-				return ok;
-			}
+/**
+ * STEP-only decision (operator call, 2026-08): the CAD pipeline no longer takes
+ * mesh input, so `.stl` is retired. It is deliberately NOT just dropped from the
+ * extension allowlist — that would yield the terse flat "File type not allowed"
+ * 400. Instead the upload path keeps routing `.stl` (and anything that *sniffs*
+ * as STL under some other extension) into this validator, so the customer gets
+ * the structured `invalid_file` per-file chip that says what to upload instead.
+ */
+export const STL_RETIRED_REASON =
+	'STL is no longer accepted — please upload STEP (.step/.stp). Mesh formats like STL lose the exact geometry our quoting engine needs.';
+
+/**
+ * Content-sniff an STL, both encodings. This carries no acceptance semantics: it
+ * is only ever consulted for a buffer whose own extension validator has ALREADY
+ * failed (e.g. an STL renamed to `.step`), purely to swap a confusing
+ * format-specific message for the honest `STL_RETIRED_REASON`. It can never
+ * turn a rejection into an acceptance.
+ */
+export function looksLikeSTL(buf: Buffer): boolean {
+	if (buf.length < 15) return false;
+	// ASCII STL: `solid <name>` … `facet normal` … `endsolid <name>`. The
+	// facet/endsolid keyword is required because plenty of other text starts
+	// with the word "solid". Sniffing the first 8 KB is enough — a real ASCII
+	// STL emits its first facet a line or two after the header.
+	const sample = buf.subarray(0, Math.min(8192, buf.length));
+	if (isMostlyPrintable(sample)) {
+		const text = sample.toString('latin1');
+		if (
+			/^\s*solid\b/i.test(text) &&
+			(/\bfacet\s+normal\b/i.test(text) || /\bendsolid\b/i.test(text))
+		) {
+			return true;
 		}
 	}
 	// Binary STL layout: 80-byte header + uint32 LE triangle count + N * 50 bytes.
-	if (buf.length < 84) {
-		return fail(
-			`STL file is too small (${buf.length} bytes) for a binary STL — needs at least 84 bytes.`
-		);
-	}
+	// The exact-length identity is what makes this a safe sniff — an unrelated
+	// file matching it by coincidence is vanishingly unlikely.
+	if (buf.length < 84) return false;
 	const triangleCount = buf.readUInt32LE(80);
-	const expected = 84 + triangleCount * 50;
-	if (buf.length !== expected) {
-		// Sanity-cap the triangle count we mention in the message — for a
-		// totally unrelated file the uint32 at offset 80 is junk and can be huge.
-		const safeCount = triangleCount > 1_000_000_000 ? '(garbage)' : String(triangleCount);
-		return fail(
-			`STL file does not match either format: it has neither an ASCII \`solid…endsolid\` body nor a valid binary layout (header claims ${safeCount} triangles → expected ${expected} bytes, got ${buf.length}). File looks like ${describeBuffer(buf)}.`
-		);
-	}
-	return ok;
+	return buf.length === 84 + triangleCount * 50;
 }
 
 export function validateParasolidText(buf: Buffer): ValidationResult {
@@ -275,6 +278,23 @@ export function validateCadFile(filename: string, buf: Buffer): ValidationResult
 		return fail('File is empty.');
 	}
 	const ext = extname(filename).toLowerCase();
+	// Layer 1 (extension): `.stl` is retired outright — STEP-only pipeline.
+	if (ext === '.stl') {
+		return fail(STL_RETIRED_REASON);
+	}
+	const result = validateByExtension(ext, buf);
+	// Layer 2 (content sniff): an STL renamed `.step` (or `.obj`, `.dxf`, …)
+	// has already failed that format's own validator above. Re-label it with
+	// the retirement message so the customer is told the real problem instead
+	// of "expected ISO-10303-21". Only ever consulted on an existing failure,
+	// so no currently-accepted format's behaviour changes.
+	if (!result.valid && looksLikeSTL(buf)) {
+		return fail(STL_RETIRED_REASON);
+	}
+	return result;
+}
+
+function validateByExtension(ext: string, buf: Buffer): ValidationResult {
 	switch (ext) {
 		case '.step':
 		case '.stp':
@@ -282,8 +302,6 @@ export function validateCadFile(filename: string, buf: Buffer): ValidationResult
 		case '.iges':
 		case '.igs':
 			return validateIGES(buf);
-		case '.stl':
-			return validateSTL(buf);
 		case '.x_t':
 			return validateParasolidText(buf);
 		case '.x_b':

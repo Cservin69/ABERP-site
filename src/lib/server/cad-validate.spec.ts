@@ -6,7 +6,8 @@ import {
 	validateCadFile,
 	validateSTEP,
 	validateIGES,
-	validateSTL,
+	looksLikeSTL,
+	STL_RETIRED_REASON,
 	validateParasolidText,
 	validateParasolidBinary,
 	validateOLE,
@@ -61,30 +62,38 @@ describe('validateIGES', () => {
 	});
 });
 
-describe('validateSTL', () => {
-	it('accepts a real ASCII STL', () => {
-		expect(validateSTL(read('valid_ascii.stl'))).toEqual({ valid: true });
+describe('looksLikeSTL (STEP-only retirement sniff)', () => {
+	it('sniffs a real ASCII STL', () => {
+		expect(looksLikeSTL(read('valid_ascii.stl'))).toBe(true);
 	});
-	it('accepts a real binary STL', () => {
-		expect(validateSTL(read('valid_binary.stl'))).toEqual({ valid: true });
+	it('sniffs a real binary STL', () => {
+		expect(looksLikeSTL(read('valid_binary.stl'))).toBe(true);
 	});
-	it('rejects a PDF with a friendly hint', () => {
-		const r = validateSTL(PDF_BYTES);
-		expect(r.valid).toBe(false);
-		if (!r.valid) expect(r.reason).toMatch(/STL/);
+	it('does not sniff a STEP file as STL', () => {
+		expect(looksLikeSTL(read('valid.step'))).toBe(false);
 	});
-	it('rejects binary STL with mismatched triangle count', () => {
-		// 84 bytes claim 5 triangles but no body present → expected 334, got 84.
+	it('does not sniff IGES / DXF fixtures as STL', () => {
+		expect(looksLikeSTL(read('valid.iges'))).toBe(false);
+		expect(looksLikeSTL(read('valid.dxf'))).toBe(false);
+	});
+	it('does not sniff non-CAD payloads as STL', () => {
+		expect(looksLikeSTL(PDF_BYTES)).toBe(false);
+		expect(looksLikeSTL(PNG_BYTES)).toBe(false);
+		expect(looksLikeSTL(TXT_BYTES)).toBe(false);
+	});
+	it('does not sniff text that merely starts with the word "solid"', () => {
+		expect(looksLikeSTL(Buffer.from('solid aluminium bar stock, 40 mm, please quote\n'))).toBe(
+			false
+		);
+	});
+	it('does not sniff a binary blob whose length misses the 84 + 50N layout', () => {
+		// 84 bytes claiming 5 triangles → a real binary STL would be 334 bytes.
 		const buf = Buffer.alloc(84);
 		buf.writeUInt32LE(5, 80);
-		const r = validateSTL(buf);
-		expect(r.valid).toBe(false);
-		if (!r.valid) expect(r.reason).toMatch(/triangles/);
+		expect(looksLikeSTL(buf)).toBe(false);
 	});
-	it('rejects an under-15-byte buffer', () => {
-		const r = validateSTL(Buffer.from('tiny'));
-		expect(r.valid).toBe(false);
-		if (!r.valid) expect(r.reason).toMatch(/too small/);
+	it('does not sniff an under-15-byte buffer', () => {
+		expect(looksLikeSTL(Buffer.from('tiny'))).toBe(false);
 	});
 });
 
@@ -240,5 +249,72 @@ describe('validateCadFile (dispatcher)', () => {
 		const r = validateCadFile('photo.stl', PNG_BYTES);
 		expect(r.valid).toBe(false);
 		if (!r.valid) expect(r.reason).toMatch(/PNG|STL/);
+	});
+});
+
+describe('validateCadFile — STL retirement (STEP-only pipeline)', () => {
+	it('rejects a genuine ASCII STL by extension', () => {
+		const r = validateCadFile('cube.stl', read('valid_ascii.stl'));
+		expect(r).toEqual({ valid: false, reason: STL_RETIRED_REASON });
+	});
+
+	it('rejects a genuine binary STL by extension', () => {
+		const r = validateCadFile('cube.stl', read('valid_binary.stl'));
+		expect(r).toEqual({ valid: false, reason: STL_RETIRED_REASON });
+	});
+
+	it('rejects `.STL` case-insensitively', () => {
+		const r = validateCadFile('CUBE.STL', read('valid_binary.stl'));
+		expect(r).toEqual({ valid: false, reason: STL_RETIRED_REASON });
+	});
+
+	it('rejects an ASCII STL renamed to .step via the content sniff', () => {
+		const r = validateCadFile('cube.step', read('valid_ascii.stl'));
+		expect(r).toEqual({ valid: false, reason: STL_RETIRED_REASON });
+	});
+
+	it('rejects a binary STL renamed to .stp via the content sniff', () => {
+		const r = validateCadFile('cube.stp', read('valid_binary.stl'));
+		expect(r).toEqual({ valid: false, reason: STL_RETIRED_REASON });
+	});
+
+	it('rejects an STL renamed to .obj / .dxf via the content sniff', () => {
+		expect(validateCadFile('cube.obj', read('valid_ascii.stl'))).toEqual({
+			valid: false,
+			reason: STL_RETIRED_REASON
+		});
+		expect(validateCadFile('cube.dxf', read('valid_binary.stl'))).toEqual({
+			valid: false,
+			reason: STL_RETIRED_REASON
+		});
+	});
+
+	it('names STEP as the replacement in the customer-facing message', () => {
+		expect(STL_RETIRED_REASON).toMatch(/no longer accepted/i);
+		expect(STL_RETIRED_REASON).toMatch(/\.step/);
+	});
+
+	it('still accepts a real STEP file (the retirement did not break STEP)', () => {
+		expect(validateCadFile('part.step', read('valid.step'))).toEqual({ valid: true });
+		expect(validateCadFile('part.stp', read('valid.step'))).toEqual({ valid: true });
+	});
+
+	it('leaves the other formats untouched', () => {
+		expect(validateCadFile('part.iges', read('valid.iges'))).toEqual({ valid: true });
+		expect(validateCadFile('plate.dxf', read('valid.dxf'))).toEqual({ valid: true });
+		expect(
+			validateCadFile('mesh.obj', Buffer.from('v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n'))
+		).toEqual({ valid: true });
+	});
+
+	it('keeps the format-specific message for a non-STL mismatch', () => {
+		// The sniff must not swallow other diagnostics: a PDF named .step still
+		// gets the "expected ISO-10303-21 / looks like a PDF" explanation.
+		const r = validateCadFile('taxi.step', PDF_BYTES);
+		expect(r.valid).toBe(false);
+		if (!r.valid) {
+			expect(r.reason).toMatch(/ISO-10303-21/);
+			expect(r.reason).not.toBe(STL_RETIRED_REASON);
+		}
 	});
 });

@@ -90,11 +90,12 @@ function makeForm(): FormData {
 	form.append('company', 'Analytical Eng');
 	form.append('material', 'aluminum');
 	form.append('consent', 'true');
-	// A minimal valid binary STL: 80-byte header + 4-byte triangle count = 0.
-	const header = Buffer.alloc(80);
-	const count = Buffer.alloc(4);
-	const stl = Buffer.concat([header, count]);
-	form.append('files', new File([new Uint8Array(stl)], 'cube.stl'));
+	// A minimal valid STEP part file. (STL was retired — the pipeline is
+	// STEP-only, so an .stl here would now come back as a 400 invalid_file.)
+	const step = Buffer.from(
+		"ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n"
+	);
+	form.append('files', new File([new Uint8Array(step)], 'cube.step'));
 	return form;
 }
 
