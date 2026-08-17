@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { resolve as pathResolve, join, basename, extname } from 'node:path';
 import { writeQuoteAtomic, type QuoteMetadata } from '$lib/server/quote-store';
 import { sendSubmissionReceivedEmail } from '$lib/server/email';
-import { validateCadFile } from '$lib/server/cad-validate';
+import { validateCadFile, RETIRED_NON_STEP_EXT } from '$lib/server/cad-validate';
 import { assertSameOrigin } from '$lib/server/origin-check';
 import { currentCatalogueGrades } from '$lib/server/catalogue-store';
 import { TOLERANCE_DEFAULT, TOLERANCE_NOTE_MAX } from '$lib/tolerance';
@@ -16,28 +16,21 @@ const MAX_TOTAL_BYTES = 50 * 1024 * 1024;
 const MAX_FILES = 10;
 const MAX_FIELD_LEN = 4096;
 const NOTES_MAX = 2000;
-const ALLOWED_EXT = new Set([
-	'.step',
-	'.stp',
-	'.iges',
-	'.igs',
-	'.x_t',
-	'.x_b',
-	'.sldprt',
-	'.ipt',
-	'.f3d',
-	'.dxf',
-	'.dwg',
-	'.3mf',
-	'.obj'
-]);
-// STEP-only decision: `.stl` was removed from ALLOWED_EXT above, but is still
-// routed past the flat allowlist gate so it reaches validateCadFile and comes
-// back as the structured `invalid_file` 400 the /quote SPA renders as a
-// per-file chip ("STL is no longer accepted — please upload STEP…"). Without
-// this, an STL upload would get the terse `File type not allowed` flat 400 with
-// no guidance. See STL_RETIRED_REASON in $lib/server/cad-validate.
-const RETIRED_EXT = new Set(['.stl']);
+// DELIBERATELY STEP-ONLY (S204). STEP is the only format the quoting pipeline
+// actually processes today — every other CAD format used to upload cleanly and
+// then dead-end as a Permanent failure downstream, so advertising them was
+// dishonest. Backlog D-18 (internal OCCT normalize) is what re-broadens this to
+// the OCCT-readable SOLID formats (IGES/BREP) once that transcode exists — do
+// not re-add an extension here before it ships. The mesh formats
+// (.stl/.3mf/.obj) stay out permanently: a mesh cannot become a solid.
+const ALLOWED_EXT = new Set(['.step', '.stp']);
+// The formats we used to accept are removed from ALLOWED_EXT above but are
+// still routed past the flat allowlist gate so they reach validateCadFile and
+// come back as the structured `invalid_file` 400 the /quote SPA renders as
+// per-file chips ("… is not accepted. We currently accept STEP only …").
+// Without this they would get the terse `File type not allowed` flat 400 with
+// no guidance. See STL_RETIRED_REASON / STEP_ONLY_REASON in cad-validate.
+const RETIRED_EXT = new Set(['.stl', ...Object.keys(RETIRED_NON_STEP_EXT)]);
 // Legacy free-text preferences accepted forever, so any pre-PR-02 tab still
 // submits cleanly (the existing dropdown emits these values). Per ADR-0003,
 // the catalogue grade set is unioned on top at validation time.

@@ -135,6 +135,65 @@ export const STL_RETIRED_REASON =
 	'STL is no longer accepted — please upload STEP (.step/.stp). Mesh formats like STL lose the exact geometry our quoting engine needs.';
 
 /**
+ * The customer-facing line for every other non-STEP format (S204). STEP is the
+ * only format the quoting pipeline actually processes today; everything else
+ * used to upload cleanly and then dead-end as a Permanent failure, which is
+ * worse than an honest reject at the door.
+ */
+export const STEP_ONLY_REASON =
+	'We currently accept STEP only (.step / .stp). Please export or convert your CAD to STEP and re-upload.';
+
+/**
+ * Formats that were on the upload allowlist until S204 and are now rejected at
+ * the door. The label is what the customer is told we saw. `.stl` is NOT in
+ * here — it keeps its own, stronger message, because mesh can never become a
+ * solid and is out permanently rather than just for now. Backlog D-18 (internal
+ * OCCT normalize) is what re-broadens the SOLID entries here (IGES/BREP first).
+ */
+export const RETIRED_NON_STEP_EXT: Readonly<Record<string, string>> = {
+	'.iges': 'IGES',
+	'.igs': 'IGES',
+	'.x_t': 'Parasolid text',
+	'.x_b': 'Parasolid binary',
+	'.sldprt': 'A SolidWorks part',
+	'.ipt': 'An Inventor part',
+	'.f3d': 'A Fusion 360 archive',
+	'.dxf': 'DXF',
+	'.dwg': 'DWG',
+	'.3mf': '3MF',
+	'.obj': 'OBJ'
+};
+
+function retiredExtReason(ext: string, label: string): string {
+	return `${label} (\`${ext}\`) is not accepted. ${STEP_ONLY_REASON}`;
+}
+
+/**
+ * Content-sniff the retired formats, most-specific magic first. Like
+ * `looksLikeSTL` this carries no acceptance semantics: it is only ever
+ * consulted after STEP validation has ALREADY failed, purely so a non-STEP
+ * file renamed `.step`/`.stp` is told what it actually is instead of getting a
+ * bare "expected ISO-10303-21". It can never turn a rejection into an
+ * acceptance. OBJ is probed last because its directive check is the loosest.
+ */
+export function sniffRetiredFormat(buf: Buffer): string | null {
+	const probes: [(b: Buffer) => ValidationResult, string][] = [
+		[validateOLE, 'a SolidWorks/Inventor part'],
+		[validateDWG, 'DWG'],
+		[(b) => validateZipArchive(b, ['3D/3dmodel.model'], '3MF'), '3MF'],
+		[(b) => validateZipArchive(b, ['manifest'], 'Fusion 360 archive'), 'a Fusion 360 archive'],
+		[validateParasolidBinary, 'Parasolid'],
+		[validateDXF, 'DXF'],
+		[validateIGES, 'IGES'],
+		[validateOBJ, 'OBJ']
+	];
+	for (const [probe, label] of probes) {
+		if (probe(buf).valid) return label;
+	}
+	return null;
+}
+
+/**
  * Content-sniff an STL, both encodings. This carries no acceptance semantics: it
  * is only ever consulted for a buffer whose own extension validator has ALREADY
  * failed (e.g. an STL renamed to `.step`), purely to swap a confusing
@@ -278,53 +337,32 @@ export function validateCadFile(filename: string, buf: Buffer): ValidationResult
 		return fail('File is empty.');
 	}
 	const ext = extname(filename).toLowerCase();
-	// Layer 1 (extension): `.stl` is retired outright — STEP-only pipeline.
+	// Layer 1 (extension). STEP is the only accepted family; `.stl` and the
+	// formats retired in S204 are rejected here with guidance, everything else
+	// never gets this far (the flat allowlist in /api/quote catches it).
 	if (ext === '.stl') {
 		return fail(STL_RETIRED_REASON);
 	}
-	const result = validateByExtension(ext, buf);
-	// Layer 2 (content sniff): an STL renamed `.step` (or `.obj`, `.dxf`, …)
-	// has already failed that format's own validator above. Re-label it with
-	// the retirement message so the customer is told the real problem instead
-	// of "expected ISO-10303-21". Only ever consulted on an existing failure,
-	// so no currently-accepted format's behaviour changes.
-	if (!result.valid && looksLikeSTL(buf)) {
+	const retiredLabel = RETIRED_NON_STEP_EXT[ext];
+	if (retiredLabel !== undefined) {
+		return fail(retiredExtReason(ext, retiredLabel));
+	}
+	if (ext !== '.step' && ext !== '.stp') {
+		return fail(`Unsupported CAD extension \`${ext}\`.`);
+	}
+
+	const result = validateSTEP(buf);
+	if (result.valid) return result;
+	// Layer 2 (content sniff): the file claims `.step`/`.stp` but is not STEP.
+	// Re-label it with the honest retirement/STEP-only message so the customer
+	// is told the real problem instead of "expected ISO-10303-21". Only ever
+	// consulted on an existing failure, so it cannot accept anything.
+	if (looksLikeSTL(buf)) {
 		return fail(STL_RETIRED_REASON);
 	}
-	return result;
-}
-
-function validateByExtension(ext: string, buf: Buffer): ValidationResult {
-	switch (ext) {
-		case '.step':
-		case '.stp':
-			return validateSTEP(buf);
-		case '.iges':
-		case '.igs':
-			return validateIGES(buf);
-		case '.x_t':
-			return validateParasolidText(buf);
-		case '.x_b':
-			return validateParasolidBinary(buf);
-		case '.sldprt':
-		case '.ipt':
-			return validateOLE(buf);
-		case '.3mf':
-			return validateZipArchive(buf, ['3D/3dmodel.model'], '3MF');
-		case '.f3d':
-			// Fusion 360 archives bundle a `manifest` plus per-component .smt files.
-			// Different exporters use different inner layouts (Fusion vs. Inventor
-			// vs. third-party); the one entry that's consistent across versions
-			// is the top-level `manifest`. We don't enforce `Project.json` because
-			// older Fusion exports omit it.
-			return validateZipArchive(buf, ['manifest'], 'Fusion 360 archive');
-		case '.dxf':
-			return validateDXF(buf);
-		case '.dwg':
-			return validateDWG(buf);
-		case '.obj':
-			return validateOBJ(buf);
-		default:
-			return fail(`Unsupported CAD extension \`${ext}\`.`);
+	const sniffed = sniffRetiredFormat(buf);
+	if (sniffed !== null) {
+		return fail(`This file looks like ${sniffed}, not STEP. ${STEP_ONLY_REASON}`);
 	}
+	return result;
 }

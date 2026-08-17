@@ -12,10 +12,12 @@
 		type ToleranceScheme
 	} from '$lib/tolerance';
 
-	// STEP-only decision: `.stl` is retired and no longer offered in the picker.
-	// The server still recognises it explicitly and answers with a structured
-	// `invalid_file` chip, so a drag-and-dropped STL is told what to send instead.
-	const ACCEPT_EXT = '.step,.stp,.iges,.igs,.x_t,.x_b,.sldprt,.ipt,.f3d,.dxf,.dwg,.3mf,.obj';
+	// STEP-only decision (S204): STEP is the only format the quoting pipeline
+	// actually processes, so it is the only one the picker offers. The retired
+	// formats (.stl and the rest) are still recognised server-side and answered
+	// with a structured `invalid_file` chip, so a drag-and-dropped .iges or .stl
+	// is told what to send instead rather than dead-ending after upload.
+	const ACCEPT_EXT = '.step,.stp';
 	const MAX_FILES = 10;
 	const MAX_TOTAL_BYTES = 50 * 1024 * 1024;
 	const NOTES_MAX = 2000;
@@ -276,8 +278,7 @@
 					<label for="files">
 						CAD files <span class="req" aria-hidden="true">*</span>
 						<span class="hint"
-							>.step .stp .iges .igs .x_t .x_b .sldprt .ipt .f3d .dxf .dwg .3mf .obj — max {MAX_FILES}
-							files, 50&nbsp;MB total</span
+							>STEP only (.step / .stp) — max {MAX_FILES} files, 50&nbsp;MB total</span
 						>
 					</label>
 					<input

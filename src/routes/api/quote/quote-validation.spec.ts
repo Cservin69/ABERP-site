@@ -88,7 +88,7 @@ describe('/api/quote content-sniffing integration', () => {
 		const POST = await importHandler();
 		const form = baseForm();
 		form.append('files', fileFromBuffer(read('valid.step'), 'good.step'));
-		form.append('files', fileFromBuffer(read('valid.iges'), 'good.iges'));
+		form.append('files', fileFromBuffer(read('valid.step'), 'good.stp'));
 		form.append('files', fileFromBuffer(read('not-cad.pdf'), 'taxi.step'));
 
 		const req = new Request('http://localhost/api/quote', { method: 'POST', body: form });
@@ -109,8 +109,8 @@ describe('/api/quote content-sniffing integration', () => {
 		const POST = await importHandler();
 		const form = baseForm();
 		form.append('files', fileFromBuffer(read('valid.step'), 'part.step'));
-		form.append('files', fileFromBuffer(read('valid.iges'), 'part.iges'));
-		form.append('files', fileFromBuffer(read('valid.dxf'), 'plate.dxf'));
+		form.append('files', fileFromBuffer(read('valid.step'), 'bracket.stp'));
+		form.append('files', fileFromBuffer(read('valid.step'), 'PART.STEP'));
 
 		const req = new Request('http://localhost/api/quote', { method: 'POST', body: form });
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal RequestEvent stub for this handler
@@ -224,6 +224,97 @@ describe('/api/quote content-sniffing integration', () => {
 			const res = await post([{ buf: read('valid.step'), name: 'part.step' }]);
 			expect(res.status).toBe(200);
 			const body = (await res.json()) as { id: string; status: string };
+			expect(body.status).toBe('received');
+		});
+	});
+
+	describe('S204 STEP-only narrowing', () => {
+		async function post(files: { buf: Buffer; name: string }[]) {
+			const POST = await importHandler();
+			const form = baseForm();
+			for (const f of files) form.append('files', fileFromBuffer(f.buf, f.name));
+			const req = new Request('http://localhost/api/quote', { method: 'POST', body: form });
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal RequestEvent stub for this handler
+			return POST({ request: req } as any);
+		}
+
+		async function invalidFiles(res: Response) {
+			expect(res.status).toBe(400);
+			const body = (await res.json()) as {
+				error: string;
+				files: { filename: string; reason: string }[];
+			};
+			expect(body.error).toBe('invalid_file');
+			return body.files;
+		}
+
+		const RETIRED = [
+			'.iges',
+			'.igs',
+			'.x_t',
+			'.x_b',
+			'.sldprt',
+			'.ipt',
+			'.f3d',
+			'.dxf',
+			'.dwg',
+			'.3mf',
+			'.obj'
+		];
+
+		it('rejects every retired extension with the structured per-file chip', async () => {
+			for (const ext of RETIRED) {
+				// Payload deliberately irrelevant: the extension alone decides, and
+				// the answer must still be `invalid_file` (renderable as a chip), not
+				// the terse flat `File type not allowed`.
+				const res = await post([
+					{ buf: Buffer.from('whatever the bytes are'), name: `part${ext}` }
+				]);
+				const files = await invalidFiles(res);
+				expect(files, ext).toHaveLength(1);
+				expect(files[0].filename, ext).toBe(`part${ext}`);
+				expect(files[0].reason, ext).toMatch(/We currently accept STEP only \(\.step \/ \.stp\)/);
+			}
+		});
+
+		it('rejects a genuine IGES upload even though the bytes are a valid IGES', async () => {
+			const res = await post([{ buf: read('valid.iges'), name: 'part.iges' }]);
+			const files = await invalidFiles(res);
+			expect(files[0].reason).toMatch(/We currently accept STEP only/);
+		});
+
+		it('rejects an IGES renamed to .step by content sniff', async () => {
+			const res = await post([{ buf: read('valid.iges'), name: 'sneaky.step' }]);
+			const files = await invalidFiles(res);
+			expect(files[0].filename).toBe('sneaky.step');
+			expect(files[0].reason).toMatch(/looks like IGES, not STEP/);
+			expect(files[0].reason).toMatch(/We currently accept STEP only/);
+		});
+
+		it('rejects a DXF renamed to .stp by content sniff', async () => {
+			const res = await post([{ buf: read('valid.dxf'), name: 'sneaky.stp' }]);
+			const files = await invalidFiles(res);
+			expect(files[0].reason).toMatch(/looks like DXF, not STEP/);
+		});
+
+		it('reports every retired file in one response instead of stopping at the first', async () => {
+			const res = await post([
+				{ buf: read('valid.step'), name: 'good.step' },
+				{ buf: read('valid.iges'), name: 'part.iges' },
+				{ buf: read('valid.dxf'), name: 'plate.dxf' }
+			]);
+			const files = await invalidFiles(res);
+			expect(files.map((f) => f.filename)).toEqual(['part.iges', 'plate.dxf']);
+		});
+
+		it('still accepts .step and .stp (and is case-insensitive)', async () => {
+			const res = await post([
+				{ buf: read('valid.step'), name: 'part.step' },
+				{ buf: read('valid.step'), name: 'part.stp' },
+				{ buf: read('valid.step'), name: 'PART.STP' }
+			]);
+			expect(res.status).toBe(200);
+			const body = (await res.json()) as { status: string };
 			expect(body.status).toBe('received');
 		});
 	});
